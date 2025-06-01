@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import pandas as pd
-import json
 
 # --- SECRETS FROM STREAMLIT CLOUD ---
 PERPLEXITY_API_KEY = st.secrets["api"]["perplexity_key"]
@@ -19,11 +18,11 @@ def call_perplexity_chat(locality, fields):
         "messages": [
             {
                 "role": "system",
-                "content": "You are a precise and objective real estate researcher. Return factual paragraph summaries."
+                "content": "You are a precise and objective real estate researcher. Return factual insights as a numbered list, one item per requested field."
             },
             {
                 "role": "user",
-                "content": f"Give a factual analysis for {locality} based on: {', '.join(fields)}. Provide clear, objective paragraph output."
+                "content": f"Analyze {locality} based on: {', '.join(fields)}. Return a numbered list with one paragraph per field."
             }
         ]
     }
@@ -34,8 +33,8 @@ def call_perplexity_chat(locality, fields):
             return None, f"Perplexity API Error {response.status_code}: {response.text}"
         result = response.json()
         if "choices" in result and len(result["choices"]) > 0:
-            content = result["choices"][0]["message"]["content"]
-            return content.strip(), None
+            content = result["choices"][0]["message"]["content"].strip()
+            return content, None
         return None, "Perplexity returned no usable content."
     except Exception as e:
         return None, f"Perplexity Exception: {str(e)}"
@@ -54,11 +53,11 @@ def call_grok_chat(locality, fields):
         "messages": [
             {
                 "role": "system",
-                "content": "You are a real estate analyst. Provide clean, concise paragraph summaries only."
+                "content": "You are a real estate analyst. Provide insights as a numbered list, one item per field."
             },
             {
                 "role": "user",
-                "content": f"Give factual insights about {locality} based on: {', '.join(fields)}. Return the output as a paragraph."
+                "content": f"Analyze {locality} based on: {', '.join(fields)}. Return a numbered list with one paragraph per field."
             }
         ]
     }
@@ -69,11 +68,37 @@ def call_grok_chat(locality, fields):
             return None, f"Grok API Error {response.status_code}: {response.text}"
         result = response.json()
         if "choices" in result and len(result["choices"]) > 0:
-            content = result["choices"][0]["message"]["content"]
-            return content.strip(), None
+            content = result["choices"][0]["message"]["content"].strip()
+            return content, None
         return None, "Grok returned no usable content."
     except Exception as e:
         return None, f"Grok Exception: {str(e)}"
+
+# --- PARSE NUMBERED LIST OUTPUT ---
+def parse_output_to_list(output, fields):
+    if not output:
+        return []
+    # Split by numbered list entries (e.g., "0. ", "1. ", etc.)
+    entries = []
+    current_entry = ""
+    lines = output.split("\n")
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        # Check if the line starts with a number followed by a dot (e.g., "0. ")
+        if any(line.startswith(f"{i}. ") for i in range(len(fields))):
+            if current_entry:
+                entries.append(current_entry.strip())
+            current_entry = line
+        else:
+            current_entry += " " + line
+    if current_entry:
+        entries.append(current_entry.strip())
+    
+    # Clean up entries by removing the numbering prefix
+    cleaned_entries = [entry.split(". ", 1)[1] if ". " in entry else entry for entry in entries]
+    return cleaned_entries
 
 # --- STREAMLIT UI ---
 st.title("📍 AI-Powered Locality Research Tool")
@@ -103,11 +128,19 @@ if st.button("🔍 Fetch Insights"):
                 final_error = grok_error
             else:
                 final_output = perplexity_output
-                final_error = None
+                final_error = perplexity_error
 
         st.subheader("📊 Locality Research Results")
         if final_output:
-            rows = [[field.strip(), para.strip()] for field, para in zip(selected_fields, final_output.split("\n")) if field.strip() and para.strip()]
+            # Parse the output into a list of insights
+            insights = parse_output_to_list(final_output, selected_fields)
+            if len(insights) != len(selected_fields):
+                st.warning("⚠️ The number of insights returned does not match the selected fields. Displaying available data.")
+            # Pair fields with insights, handling mismatches
+            rows = []
+            for i, field in enumerate(selected_fields):
+                insight = insights[i] if i < len(insights) else "No data available."
+                rows.append([field, insight])
             df = pd.DataFrame(rows, columns=["Aspect", "Insights"])
             st.dataframe(df)
         else:
