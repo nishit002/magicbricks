@@ -19,11 +19,11 @@ def call_perplexity_chat(locality, fields):
         "messages": [
             {
                 "role": "system",
-                "content": "You are a precise and objective real estate researcher. Return structured facts in JSON format."
+                "content": "You are a precise and objective real estate researcher. Return factual paragraph summaries."
             },
             {
                 "role": "user",
-                "content": f"Give a factual analysis for {locality} based on: {', '.join(fields)}. Respond in JSON with keys and values."
+                "content": f"Give a factual analysis for {locality} based on: {', '.join(fields)}. Provide clear, objective paragraph output."
             }
         ]
     }
@@ -35,10 +35,7 @@ def call_perplexity_chat(locality, fields):
         result = response.json()
         if "choices" in result and len(result["choices"]) > 0:
             content = result["choices"][0]["message"]["content"]
-            try:
-                return json.loads(content), None
-            except:
-                return {"Raw Response": content}, None
+            return content.strip(), None
         return None, "Perplexity returned no usable content."
     except Exception as e:
         return None, f"Perplexity Exception: {str(e)}"
@@ -57,11 +54,11 @@ def call_grok_chat(locality, fields):
         "messages": [
             {
                 "role": "system",
-                "content": "You are a real estate analyst. Return facts only, in JSON format."
+                "content": "You are a real estate analyst. Provide clean, concise paragraph summaries only."
             },
             {
                 "role": "user",
-                "content": f"Give factual structured data about {locality} including: {', '.join(fields)}. Respond as JSON key-value."
+                "content": f"Give factual insights about {locality} based on: {', '.join(fields)}. Return the output as a paragraph."
             }
         ]
     }
@@ -73,10 +70,7 @@ def call_grok_chat(locality, fields):
         result = response.json()
         if "choices" in result and len(result["choices"]) > 0:
             content = result["choices"][0]["message"]["content"]
-            try:
-                return json.loads(content), None
-            except:
-                return {"Raw Response": content}, None
+            return content.strip(), None
         return None, "Grok returned no usable content."
     except Exception as e:
         return None, f"Grok Exception: {str(e)}"
@@ -112,9 +106,8 @@ if st.button("🔍 Fetch Insights"):
                 final_error = None
 
         st.subheader("📊 Locality Research Results")
-        if isinstance(final_output, dict) and len(final_output) > 0:
-            df = pd.DataFrame(final_output.items(), columns=["Attribute", "Value"])
-            st.dataframe(df)
+        if final_output:
+            st.write(final_output)
         else:
             st.warning("⚠️ No valid data received from either API.")
 
