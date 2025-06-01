@@ -38,8 +38,7 @@ def call_perplexity_chat(locality, fields):
         if response.status_code != 200:
             return None, f"Perplexity API Error {response.status_code}: {response.text}"
         result = response.json()
-        if "choices" in result and len(result["choices"])%BD
-
+        if "choices" in result and len(result["choices"]) > 0:
             content = result["choices"][0]["message"]["content"]
             return content.strip(), None
         return None, "Perplexity returned no usable content."
