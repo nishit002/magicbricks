@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
-import re
+import json
 
 # --- SECRETS FROM STREAMLIT CLOUD ---
 PERPLEXITY_API_KEY = st.secrets["api"]["perplexity_key"]
@@ -14,16 +14,21 @@ def call_perplexity_chat(locality, fields):
         "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
         "Content-Type": "application/json"
     }
+    # Explicitly instruct the API to return one paragraph per field
+    prompt = (
+        f"Provide a factual analysis for {locality} based on the following aspects: {', '.join(fields)}. "
+        f"Return exactly {len(fields)} paragraphs, one for each aspect in the order given, separated by double newlines."
+    )
     payload = {
         "model": "sonar",
         "messages": [
             {
                 "role": "system",
-                "content": "You are a precise and objective real estate researcher. Return factual insights as a numbered list, one item per requested field. Avoid vague responses like 'not found' or 'no data available'—only provide detailed, complete information."
+                "content": "You are a precise and objective real estate researcher. Return factual paragraph summaries."
             },
             {
                 "role": "user",
-                "content": f"Analyze {locality} based on: {', '.join(fields)}. Return a numbered list with one detailed paragraph per field. If data is unavailable for a field, skip that field and do not include it in the list."
+                "content": prompt
             }
         ]
     }
@@ -33,9 +38,10 @@ def call_perplexity_chat(locality, fields):
         if response.status_code != 200:
             return None, f"Perplexity API Error {response.status_code}: {response.text}"
         result = response.json()
-        if "choices" in result and len(result["choices"]) > 0:
-            content = result["choices"][0]["message"]["content"].strip()
-            return content, None
+        if "choices" in result and len(result["choices"])%BD
+
+            content = result["choices"][0]["message"]["content"]
+            return content.strip(), None
         return None, "Perplexity returned no usable content."
     except Exception as e:
         return None, f"Perplexity Exception: {str(e)}"
@@ -47,6 +53,11 @@ def call_grok_chat(locality, fields):
         "Authorization": f"Bearer {GROK_API_KEY}",
         "Content-Type": "application/json"
     }
+    # Explicitly instruct the API to return one paragraph per field
+    prompt = (
+        f"Provide factual insights about {locality} based on the following aspects: {', '.join(fields)}. "
+        f"Return exactly {len(fields)} paragraphs, one for each aspect in the order given, separated by double newlines."
+    )
     payload = {
         "model": "grok-3-latest",
         "stream": False,
@@ -54,11 +65,11 @@ def call_grok_chat(locality, fields):
         "messages": [
             {
                 "role": "system",
-                "content": "You are a real estate analyst. Provide detailed, polished insights as a numbered list, one item per field. Avoid vague responses like 'not found' or 'no data available'—only include fields with complete, factual information."
+                "content": "You are a real estate analyst. Provide clean, concise paragraph summaries only."
             },
             {
                 "role": "user",
-                "content": f"Analyze {locality} based on: {', '.join(fields)}. Return a numbered list with one detailed paragraph per field. Do not include fields where data is unavailable or incomplete."
+                "content": prompt
             }
         ]
     }
@@ -69,42 +80,11 @@ def call_grok_chat(locality, fields):
             return None, f"Grok API Error {response.status_code}: {response.text}"
         result = response.json()
         if "choices" in result and len(result["choices"]) > 0:
-            content = result["choices"][0]["message"]["content"].strip()
-            return content, None
+            content = result["choices"][0]["message"]["content"]
+            return content.strip(), None
         return None, "Grok returned no usable content."
     except Exception as e:
         return None, f"Grok Exception: {str(e)}"
-
-# --- PARSE NUMBERED LIST OUTPUT ---
-def parse_output_to_list(output, fields):
-    if not output:
-        return []
-    # Split by numbered list entries (e.g., "0. ", "1. ", etc.)
-    entries = []
-    current_entry = ""
-    lines = output.split("\n")
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        # Check if the line starts with a number followed by a dot (e.g., "0. ")
-        if any(line.startswith(f"{i}. ") for i in range(len(fields))):
-            if current_entry:
-                entries.append(current_entry.strip())
-            current_entry = line
-        else:
-            current_entry += " " + line
-    if current_entry:
-        entries.append(current_entry.strip())
-    
-    # Clean up entries by removing the numbering prefix and filtering incomplete data
-    cleaned_entries = []
-    for entry in entries:
-        cleaned_entry = entry.split(". ", 1)[1] if ". " in entry else entry
-        # Skip entries with "not found" or "no data available"
-        if not re.search(r"(not found|no data available)", cleaned_entry, re.IGNORECASE):
-            cleaned_entries.append(cleaned_entry)
-    return cleaned_entries
 
 # --- STREAMLIT UI ---
 st.title("📍 AI-Powered Locality Research Tool")
@@ -116,7 +96,8 @@ data_points = [
     "Rental Yield", "Demographics", "Growth Potential", "Public Transport", "Safety"
 ]
 
-selected_fields = st.mult AscendingList = st.multiselect("Select Data Points to Fetch", options=data_points)
+# Fixed the syntax error here
+selected_fields = st.multiselect("Select Data Points to Fetch", options=data_points)
 
 if st.button("🔍 Fetch Insights"):
     if not locality_input or not selected_fields:
@@ -134,36 +115,24 @@ if st.button("🔍 Fetch Insights"):
                 final_error = grok_error
             else:
                 final_output = perplexity_output
-                final_error = perplexity_error
+                final_error = None
 
         st.subheader("📊 Locality Research Results")
         if final_output:
-            # Parse the output into a list of insights
-            insights = parse_output_to_list(final_output, selected_fields)
-            if not insights:
-                st.warning("⚠️ No complete data available for the selected fields.")
+            # Split by double newlines to separate paragraphs
+            paragraphs = [p.strip() for p in final_output.split("\n\n") if p.strip()]
+            
+            # Check if the number of paragraphs matches the number of selected fields
+            if len(paragraphs) != len(selected_fields):
+                st.warning(
+                    f"⚠️ Expected {len(selected_fields)} paragraphs but received {len(paragraphs)}. "
+                    "Please try again or select different data points."
+                )
             else:
-                # Create a DataFrame for the table
-                rows = []
-                for i, field in enumerate(selected_fields):
-                    if i < len(insights):
-                        rows.append([field, insights[i]])
-                
-                df = pd.DataFrame(rows, columns=["Aspect", "Insights"])
-                
-                # Style the DataFrame for better presentation
-                styled_df = df.style.set_properties(**{
-                    'text-align': 'left',
-                    'white-space': 'pre-wrap',
-                    'border': '1px solid #ddd',
-                    'padding': '8px',
-                    'font-size': '14px'
-                }).set_table_styles([
-                    {'selector': 'th', 'props': [('background-color', '#f0f0f0'), ('font-weight', 'bold'), ('border', '1px solid #ddd'), ('padding', '8px')]}
-                ])
-                
-                # Display the styled DataFrame
-                st.dataframe(styled_df, use_container_width=True)
+                # Create rows by pairing each field with its corresponding paragraph
+                rows = [[i, selected_fields[i], paragraphs[i]] for i in range(len(selected_fields))]
+                df = pd.DataFrame(rows, columns=["", "Aspect", "Insights"])
+                st.dataframe(df)
         else:
             st.warning("⚠️ No valid data received from either API.")
 
