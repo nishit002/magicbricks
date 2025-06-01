@@ -3,12 +3,11 @@ import requests
 import pandas as pd
 import json
 
-# --- CONFIGURATION ---
-PERPLEXITY_API_KEY = "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"
-GROK_API_KEY = "xai-0SUbMopdzRt6FgFO6rrudOiBu2JHgZ3yimfkPXoK0bwCOnbgLJupZcDoJ4c4GnenFncizgOpeZwXg9rQ"
+# --- CONFIGURATION FROM SECRETS ---
+PERPLEXITY_API_KEY = st.secrets["api"]["perplexity_key"]
+GROK_API_KEY = st.secrets["api"]["grok_key"]
 
 # --- FUNCTIONS ---
-
 def call_perplexity_api(topic, fields):
     url = "https://api.perplexity.ai/search"
     headers = {
@@ -55,7 +54,7 @@ def parse_perplexity_result(result):
     return pd.DataFrame(data_points)
 
 # --- STREAMLIT UI ---
-st.title("🔍 Locality Research using Perplexity + Grok")
+st.title("📊 Locality Research using Perplexity + Grok")
 
 locality_input = st.text_input("Enter Locality or Project Name")
 
@@ -84,7 +83,7 @@ if st.button("Fetch Data"):
 
             if perplexity_result:
                 df = parse_perplexity_result(perplexity_result)
-                st.subheader("📊 Structured Results from Perplexity")
+                st.subheader("📑 Structured Results from Perplexity")
                 st.dataframe(df)
 
             if grok_context:
