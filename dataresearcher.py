@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
+import re
 
 # --- SECRETS FROM STREAMLIT CLOUD ---
 PERPLEXITY_API_KEY = st.secrets["api"]["perplexity_key"]
@@ -18,11 +19,11 @@ def call_perplexity_chat(locality, fields):
         "messages": [
             {
                 "role": "system",
-                "content": "You are a precise and objective real estate researcher. Return factual insights as a numbered list, one item per requested field."
+                "content": "You are a precise and objective real estate researcher. Return factual insights as a numbered list, one item per requested field. Avoid vague responses like 'not found' or 'no data available'—only provide detailed, complete information."
             },
             {
                 "role": "user",
-                "content": f"Analyze {locality} based on: {', '.join(fields)}. Return a numbered list with one paragraph per field."
+                "content": f"Analyze {locality} based on: {', '.join(fields)}. Return a numbered list with one detailed paragraph per field. If data is unavailable for a field, skip that field and do not include it in the list."
             }
         ]
     }
@@ -53,11 +54,11 @@ def call_grok_chat(locality, fields):
         "messages": [
             {
                 "role": "system",
-                "content": "You are a real estate analyst. Provide insights as a numbered list, one item per field."
+                "content": "You are a real estate analyst. Provide detailed, polished insights as a numbered list, one item per field. Avoid vague responses like 'not found' or 'no data available'—only include fields with complete, factual information."
             },
             {
                 "role": "user",
-                "content": f"Analyze {locality} based on: {', '.join(fields)}. Return a numbered list with one paragraph per field."
+                "content": f"Analyze {locality} based on: {', '.join(fields)}. Return a numbered list with one detailed paragraph per field. Do not include fields where data is unavailable or incomplete."
             }
         ]
     }
@@ -96,8 +97,13 @@ def parse_output_to_list(output, fields):
     if current_entry:
         entries.append(current_entry.strip())
     
-    # Clean up entries by removing the numbering prefix
-    cleaned_entries = [entry.split(". ", 1)[1] if ". " in entry else entry for entry in entries]
+    # Clean up entries by removing the numbering prefix and filtering incomplete data
+    cleaned_entries = []
+    for entry in entries:
+        cleaned_entry = entry.split(". ", 1)[1] if ". " in entry else entry
+        # Skip entries with "not found" or "no data available"
+        if not re.search(r"(not found|no data available)", cleaned_entry, re.IGNORECASE):
+            cleaned_entries.append(cleaned_entry)
     return cleaned_entries
 
 # --- STREAMLIT UI ---
@@ -110,7 +116,7 @@ data_points = [
     "Rental Yield", "Demographics", "Growth Potential", "Public Transport", "Safety"
 ]
 
-selected_fields = st.multiselect("Select Data Points to Fetch", options=data_points)
+selected_fields = st.mult AscendingList = st.multiselect("Select Data Points to Fetch", options=data_points)
 
 if st.button("🔍 Fetch Insights"):
     if not locality_input or not selected_fields:
@@ -134,15 +140,30 @@ if st.button("🔍 Fetch Insights"):
         if final_output:
             # Parse the output into a list of insights
             insights = parse_output_to_list(final_output, selected_fields)
-            if len(insights) != len(selected_fields):
-                st.warning("⚠️ The number of insights returned does not match the selected fields. Displaying available data.")
-            # Pair fields with insights, handling mismatches
-            rows = []
-            for i, field in enumerate(selected_fields):
-                insight = insights[i] if i < len(insights) else "No data available."
-                rows.append([field, insight])
-            df = pd.DataFrame(rows, columns=["Aspect", "Insights"])
-            st.dataframe(df)
+            if not insights:
+                st.warning("⚠️ No complete data available for the selected fields.")
+            else:
+                # Create a DataFrame for the table
+                rows = []
+                for i, field in enumerate(selected_fields):
+                    if i < len(insights):
+                        rows.append([field, insights[i]])
+                
+                df = pd.DataFrame(rows, columns=["Aspect", "Insights"])
+                
+                # Style the DataFrame for better presentation
+                styled_df = df.style.set_properties(**{
+                    'text-align': 'left',
+                    'white-space': 'pre-wrap',
+                    'border': '1px solid #ddd',
+                    'padding': '8px',
+                    'font-size': '14px'
+                }).set_table_styles([
+                    {'selector': 'th', 'props': [('background-color', '#f0f0f0'), ('font-weight', 'bold'), ('border', '1px solid #ddd'), ('padding', '8px')]}
+                ])
+                
+                # Display the styled DataFrame
+                st.dataframe(styled_df, use_container_width=True)
         else:
             st.warning("⚠️ No valid data received from either API.")
 
