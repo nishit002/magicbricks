@@ -139,6 +139,9 @@ if st.button("🔍 Fetch Insights"):
                         table {
                             width: 100%;
                             border-collapse: collapse;
+                            table-layout: fixed;
+                            word-wrap: break-word;
+                            overflow-x: auto;
                         }
                         table, th, td {
                             border: 1px solid #ddd;
@@ -153,14 +156,28 @@ if st.button("🔍 Fetch Insights"):
                         tr:nth-child(even) {
                             background-color: #f9f9f9;
                         }
+                        .dataframe-container {
+                            max-width: 100%;
+                            overflow-x: auto;
+                        }
                     </style>
                 """, unsafe_allow_html=True)
+                st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
                 st.dataframe(df.style.set_properties(**{
                     "font-size": "14px",
                     "color": "black",
                     "background-color": "#f9f9f9",
                     "border-color": "#ddd"
                 }))
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                # For plain text-based output:
+                st.subheader("📋 Text-Based Output")
+                text_table = ""
+                for i in range(len(selected_fields)):
+                    text_table += f"| {i + 1} | {selected_fields[i]} | {paragraphs[i]} |\n"
+                    text_table += "| --- | --- | --- |\n"
+                st.text(text_table)
         else:
             st.warning("⚠️ No valid data received from either API.")
 
