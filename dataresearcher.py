@@ -107,7 +107,9 @@ if st.button("🔍 Fetch Insights"):
 
         st.subheader("📊 Locality Research Results")
         if final_output:
-            st.write(final_output)
+            rows = [[field.strip(), para.strip()] for field, para in zip(selected_fields, final_output.split("\n")) if field.strip() and para.strip()]
+            df = pd.DataFrame(rows, columns=["Aspect", "Insights"])
+            st.dataframe(df)
         else:
             st.warning("⚠️ No valid data received from either API.")
 
