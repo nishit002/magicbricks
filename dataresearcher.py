@@ -3,89 +3,88 @@ import requests
 import pandas as pd
 import json
 
-# --- CONFIGURATION FROM SECRETS ---
+# --- SECRETS FROM STREAMLIT CLOUD ---
 PERPLEXITY_API_KEY = st.secrets["api"]["perplexity_key"]
 GROK_API_KEY = st.secrets["api"]["grok_key"]
 
-# --- FUNCTIONS ---
-def call_perplexity_api(topic, fields):
-    url = "https://api.perplexity.ai/search"
+# --- PERPLEXITY CHAT COMPLETION ---
+def call_perplexity_chat(locality, fields):
+    url = "https://api.perplexity.ai/chat/completions"
     headers = {
         "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
-        "query": f"Objective, relevant data for locality: {topic}, focused on: {', '.join(fields)}",
-        "include_sources": True
+        "model": "sonar",
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a precise and objective real estate researcher."
+            },
+            {
+                "role": "user",
+                "content": f"Give a data-backed analysis for {locality} based on: {', '.join(fields)}. Be objective and structured."
+            }
+        ]
     }
-    response = requests.post(url, headers=headers, data=json.dumps(payload))
-    if response.status_code == 200:
-        return response.json()
-    else:
-        st.error(f"Perplexity API error: {response.text}")
-        return None
 
-def call_grok_api(topic):
-    url = "https://api.grok.com/v1/query"
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        return response.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"❌ Perplexity Error: {e}"
+
+# --- GROK CHAT COMPLETION ---
+def call_grok_chat(locality):
+    url = "https://api.x.ai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROK_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
-        "prompt": f"Provide contextual information for the locality: {topic}. Focus on socio-economic, real estate trends, and development factors. Give a paragraph.",
-        "max_tokens": 300
+        "model": "grok-3-latest",
+        "stream": False,
+        "temperature": 0,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a real estate analyst. Focus only on location-specific facts."
+            },
+            {
+                "role": "user",
+                "content": f"Write a factual summary about {locality} including infrastructure, livability, housing demand, and growth potential."
+            }
+        ]
     }
-    response = requests.post(url, headers=headers, data=json.dumps(payload))
-    if response.status_code == 200:
-        return response.json().get("output", "")
-    else:
-        st.error(f"Grok API error: {response.text}")
-        return ""
 
-def parse_perplexity_result(result):
-    data_points = []
-    for source in result.get("results", []):
-        data_points.append({
-            "Title": source.get("title"),
-            "Snippet": source.get("snippet"),
-            "URL": source.get("url"),
-            "Source": source.get("source")
-        })
-    return pd.DataFrame(data_points)
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        return response.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"❌ Grok Error: {e}"
 
 # --- STREAMLIT UI ---
-st.title("📊 Locality Research using Perplexity + Grok")
+st.title("📍 AI-Powered Locality Research Tool")
 
-locality_input = st.text_input("Enter Locality or Project Name")
+locality_input = st.text_input("Enter a Locality or Project Name")
 
-data_options = [
-    "Real Estate Trends",
-    "Connectivity",
-    "Nearby Infrastructure",
-    "Rental Yield",
-    "Buyer Demographics",
-    "Upcoming Projects",
-    "Price Trends",
-    "Social Infrastructure",
-    "Schools & Hospitals",
-    "Green Cover & Pollution Levels"
+data_points = [
+    "Real Estate Trends", "Connectivity", "Price Trends", "Nearby Infrastructure",
+    "Rental Yield", "Demographics", "Growth Potential", "Public Transport", "Safety"
 ]
 
-selected_options = st.multiselect("Select Data Points to Fetch", options=data_options)
+selected_fields = st.multiselect("Select Data Points to Fetch", options=data_points)
 
-if st.button("Fetch Data"):
-    if not locality_input or not selected_options:
-        st.warning("Please provide both locality and at least one data point.")
+if st.button("🔍 Fetch Insights"):
+    if not locality_input or not selected_fields:
+        st.warning("Please enter a locality and select at least one data point.")
     else:
-        with st.spinner("Fetching objective data using Perplexity and Grok..."):
-            perplexity_result = call_perplexity_api(locality_input, selected_options)
-            grok_context = call_grok_api(locality_input)
+        with st.spinner("Contacting Perplexity and Grok APIs..."):
+            perplexity_output = call_perplexity_chat(locality_input, selected_fields)
+            grok_output = call_grok_chat(locality_input)
 
-            if perplexity_result:
-                df = parse_perplexity_result(perplexity_result)
-                st.subheader("📑 Structured Results from Perplexity")
-                st.dataframe(df)
+        st.subheader("🧠 Perplexity Response")
+        st.write(perplexity_output)
 
-            if grok_context:
-                st.subheader("🧠 Contextual Summary from Grok")
-                st.write(grok_context)
+        st.subheader("🤖 Grok Response")
+        st.write(grok_output)
