@@ -19,11 +19,11 @@ def call_perplexity_chat(locality, fields):
         "messages": [
             {
                 "role": "system",
-                "content": "You are a precise and objective real estate researcher. Return structured facts in key:value format."
+                "content": "You are a precise and objective real estate researcher. Return structured facts in JSON format."
             },
             {
                 "role": "user",
-                "content": f"Give a factual analysis for {locality} based on: {', '.join(fields)}. Respond in JSON format with key-value pairs."
+                "content": f"Give a factual analysis for {locality} based on: {', '.join(fields)}. Respond in JSON with keys and values."
             }
         ]
     }
@@ -31,10 +31,13 @@ def call_perplexity_chat(locality, fields):
     try:
         response = requests.post(url, headers=headers, json=payload)
         result = response.json()
-        content = result["choices"][0]["message"]["content"]
-        return json.loads(content)
+        if "choices" in result and len(result["choices"]) > 0:
+            content = result["choices"][0]["message"]["content"]
+            return json.loads(content)
+        else:
+            return {"Error": "Perplexity returned no usable content."}
     except Exception as e:
-        return {"Error": f"Perplexity Error: {e}"}
+        return {"Error": f"Perplexity Error: {str(e)}"}
 
 # --- GROK CHAT COMPLETION ---
 def call_grok_chat(locality):
@@ -62,10 +65,13 @@ def call_grok_chat(locality):
     try:
         response = requests.post(url, headers=headers, json=payload)
         result = response.json()
-        content = result["choices"][0]["message"]["content"]
-        return json.loads(content)
+        if "choices" in result and len(result["choices"]) > 0:
+            content = result["choices"][0]["message"]["content"]
+            return json.loads(content)
+        else:
+            return {"Error": "Grok returned no usable content."}
     except Exception as e:
-        return {"Error": f"Grok Error: {e}"}
+        return {"Error": f"Grok Error: {str(e)}"}
 
 # --- STREAMLIT UI ---
 st.title("📍 AI-Powered Locality Research Tool")
@@ -88,15 +94,15 @@ if st.button("🔍 Fetch Insights"):
             grok_output = call_grok_chat(locality_input)
 
         st.subheader("🧠 Perplexity Response")
-        if isinstance(perplexity_output, dict):
+        if isinstance(perplexity_output, dict) and len(perplexity_output) > 0:
             df1 = pd.DataFrame(perplexity_output.items(), columns=["Attribute", "Value"])
             st.dataframe(df1)
         else:
-            st.error("Invalid Perplexity Output")
+            st.warning("⚠️ No valid Perplexity data received.")
 
         st.subheader("🤖 Grok Response")
-        if isinstance(grok_output, dict):
+        if isinstance(grok_output, dict) and len(grok_output) > 0:
             df2 = pd.DataFrame(grok_output.items(), columns=["Attribute", "Value"])
             st.dataframe(df2)
         else:
-            st.error("Invalid Grok Output")
+            st.warning("⚠️ No valid Grok data received.")
