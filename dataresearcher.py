@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import pandas as pd
-import json
 
 # --- SECRETS FROM STREAMLIT CLOUD ---
 PERPLEXITY_API_KEY = st.secrets["api"]["perplexity_key"]
@@ -14,17 +13,17 @@ def call_perplexity_chat(locality, fields):
         "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
         "Content-Type": "application/json"
     }
-    # Explicitly instruct the API to return one paragraph per field
     prompt = (
-        f"Provide a factual analysis for {locality} based on the following aspects: {', '.join(fields)}. "
-        f"Return exactly {len(fields)} paragraphs, one for each aspect in the order given, separated by double newlines."
+        f"Provide a detailed factual analysis for {locality} based on the following aspects: {', '.join(fields)}. "
+        f"For each aspect, include concrete numbers, such as average price per square foot, growth rates, rental yields, "
+        f"and any available numerical data. Return exactly {len(fields)} paragraphs, one for each aspect, separated by double newlines."
     )
     payload = {
         "model": "sonar",
         "messages": [
             {
                 "role": "system",
-                "content": "You are a precise and objective real estate researcher. Return factual paragraph summaries."
+                "content": "You are a precise and objective real estate researcher. Return factual, data-driven paragraph summaries."
             },
             {
                 "role": "user",
@@ -52,9 +51,9 @@ def call_grok_chat(locality, fields):
         "Authorization": f"Bearer {GROK_API_KEY}",
         "Content-Type": "application/json"
     }
-    # Explicitly instruct the API to return one paragraph per field
     prompt = (
-        f"Provide factual insights about {locality} based on the following aspects: {', '.join(fields)}. "
+        f"Provide detailed factual insights about {locality} based on the following aspects: {', '.join(fields)}. "
+        f"For each aspect, include specific numbers such as average prices, rental yields, growth rates, and other relevant data. "
         f"Return exactly {len(fields)} paragraphs, one for each aspect in the order given, separated by double newlines."
     )
     payload = {
@@ -64,7 +63,7 @@ def call_grok_chat(locality, fields):
         "messages": [
             {
                 "role": "system",
-                "content": "You are a real estate analyst. Provide clean, concise paragraph summaries only."
+                "content": "You are a real estate analyst. Provide clean, data-driven paragraph summaries only."
             },
             {
                 "role": "user",
@@ -95,7 +94,6 @@ data_points = [
     "Rental Yield", "Demographics", "Growth Potential", "Public Transport", "Safety"
 ]
 
-# Fixed the syntax error here
 selected_fields = st.multiselect("Select Data Points to Fetch", options=data_points)
 
 if st.button("🔍 Fetch Insights"):
@@ -129,9 +127,40 @@ if st.button("🔍 Fetch Insights"):
                 )
             else:
                 # Create rows by pairing each field with its corresponding paragraph
-                rows = [[i, selected_fields[i], paragraphs[i]] for i in range(len(selected_fields))]
-                df = pd.DataFrame(rows, columns=["", "Aspect", "Insights"])
-                st.dataframe(df)
+                rows = [[i + 1, selected_fields[i], paragraphs[i]] for i in range(len(selected_fields))]
+                df = pd.DataFrame(rows, columns=["#", "Aspect", "Insights"])
+
+                # Enhance table display
+                st.markdown("""
+                    <style>
+                        .streamlit-expanderHeader {
+                            font-size: 1.2em;
+                        }
+                        table {
+                            width: 100%;
+                            border-collapse: collapse;
+                        }
+                        table, th, td {
+                            border: 1px solid #ddd;
+                        }
+                        th, td {
+                            padding: 10px;
+                            text-align: left;
+                        }
+                        th {
+                            background-color: #f2f2f2;
+                        }
+                        tr:nth-child(even) {
+                            background-color: #f9f9f9;
+                        }
+                    </style>
+                """, unsafe_allow_html=True)
+                st.dataframe(df.style.set_properties(**{
+                    "font-size": "14px",
+                    "color": "black",
+                    "background-color": "#f9f9f9",
+                    "border-color": "#ddd"
+                }))
         else:
             st.warning("⚠️ No valid data received from either API.")
 
