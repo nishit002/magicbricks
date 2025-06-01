@@ -30,17 +30,21 @@ def call_perplexity_chat(locality, fields):
 
     try:
         response = requests.post(url, headers=headers, json=payload)
+        if response.status_code != 200:
+            return None, f"Perplexity API Error {response.status_code}: {response.text}"
         result = response.json()
         if "choices" in result and len(result["choices"]) > 0:
             content = result["choices"][0]["message"]["content"]
-            return json.loads(content)
-        else:
-            return {"Error": "Perplexity returned no usable content."}
+            try:
+                return json.loads(content), None
+            except:
+                return {"Raw Response": content}, None
+        return None, "Perplexity returned no usable content."
     except Exception as e:
-        return {"Error": f"Perplexity Error: {str(e)}"}
+        return None, f"Perplexity Exception: {str(e)}"
 
 # --- GROK CHAT COMPLETION ---
-def call_grok_chat(locality):
+def call_grok_chat(locality, fields):
     url = "https://api.x.ai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROK_API_KEY}",
@@ -57,21 +61,25 @@ def call_grok_chat(locality):
             },
             {
                 "role": "user",
-                "content": f"Give factual structured data about {locality} including infrastructure, housing demand, safety, and rental trends. Respond as JSON key-value."
+                "content": f"Give factual structured data about {locality} including: {', '.join(fields)}. Respond as JSON key-value."
             }
         ]
     }
 
     try:
         response = requests.post(url, headers=headers, json=payload)
+        if response.status_code != 200:
+            return None, f"Grok API Error {response.status_code}: {response.text}"
         result = response.json()
         if "choices" in result and len(result["choices"]) > 0:
             content = result["choices"][0]["message"]["content"]
-            return json.loads(content)
-        else:
-            return {"Error": "Grok returned no usable content."}
+            try:
+                return json.loads(content), None
+            except:
+                return {"Raw Response": content}, None
+        return None, "Grok returned no usable content."
     except Exception as e:
-        return {"Error": f"Grok Error: {str(e)}"}
+        return None, f"Grok Exception: {str(e)}"
 
 # --- STREAMLIT UI ---
 st.title("📍 AI-Powered Locality Research Tool")
@@ -90,19 +98,27 @@ if st.button("🔍 Fetch Insights"):
         st.warning("Please enter a locality and select at least one data point.")
     else:
         with st.spinner("Contacting Perplexity and Grok APIs..."):
-            perplexity_output = call_perplexity_chat(locality_input, selected_fields)
-            grok_output = call_grok_chat(locality_input)
+            # Try Perplexity first
+            perplexity_output, perplexity_error = call_perplexity_chat(locality_input, selected_fields)
+            fallback_used = False
 
-        st.subheader("🧠 Perplexity Response")
-        if isinstance(perplexity_output, dict) and len(perplexity_output) > 0:
-            df1 = pd.DataFrame(perplexity_output.items(), columns=["Attribute", "Value"])
-            st.dataframe(df1)
-        else:
-            st.warning("⚠️ No valid Perplexity data received.")
+            if perplexity_output is None:
+                fallback_used = True
+                grok_output, grok_error = call_grok_chat(locality_input, selected_fields)
+                final_output = grok_output
+                final_error = grok_error
+            else:
+                final_output = perplexity_output
+                final_error = None
 
-        st.subheader("🤖 Grok Response")
-        if isinstance(grok_output, dict) and len(grok_output) > 0:
-            df2 = pd.DataFrame(grok_output.items(), columns=["Attribute", "Value"])
-            st.dataframe(df2)
+        st.subheader("📊 Locality Research Results")
+        if isinstance(final_output, dict) and len(final_output) > 0:
+            df = pd.DataFrame(final_output.items(), columns=["Attribute", "Value"])
+            st.dataframe(df)
         else:
-            st.warning("⚠️ No valid Grok data received.")
+            st.warning("⚠️ No valid data received from either API.")
+
+        if final_error:
+            st.caption(f"🔧 Debug: {final_error}")
+        elif fallback_used:
+            st.caption("⚠️ Perplexity failed. Fallback used: Grok")
