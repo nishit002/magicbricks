@@ -4,7 +4,6 @@ import requests
 import urllib.parse
 import time
 from youtube_transcript_api import YouTubeTranscriptApi
-from openai import OpenAI
 from urllib.parse import urlparse, parse_qs
 import json
 import os
@@ -22,22 +21,45 @@ st.set_page_config(
 @st.cache_resource
 def init_openai_client():
     try:
-        # Initialize client with minimal parameters to avoid compatibility issues
-        return OpenAI(
-            api_key=st.secrets["OPENAI"]["API_KEY"], 
-            base_url="https://api.x.ai/v1",
-            timeout=30.0
-        )
+        # Try different initialization methods to handle compatibility issues
+        api_key = st.secrets["OPENAI"]["API_KEY"]
+        base_url = "https://api.x.ai/v1"
+        
+        # Method 1: Basic initialization
+        try:
+            return OpenAI(
+                api_key=api_key,
+                base_url=base_url
+            )
+        except TypeError:
+            # Method 2: Try with explicit parameters only
+            try:
+                import openai
+                client = openai.OpenAI()
+                client.api_key = api_key
+                client.base_url = base_url
+                return client
+            except:
+                # Method 3: Manual configuration
+                os.environ["OPENAI_API_KEY"] = api_key
+                os.environ["OPENAI_BASE_URL"] = base_url
+                return OpenAI()
+                
     except KeyError:
         st.error("OpenAI API key is missing in secrets. Please configure it in .streamlit/secrets.toml.")
         st.stop()
     except Exception as e:
         st.error(f"Error initializing OpenAI client: {e}")
-        st.stop()
+        # Return None instead of stopping, so we can handle this gracefully
+        return None
 
 # Initialize client only when needed
 def get_client():
-    return init_openai_client()
+    client = init_openai_client()
+    if client is None:
+        st.error("Could not initialize OpenAI client. Please check your configuration.")
+        return None
+    return client
 GROQ_MODEL = 'grok-3-mini-beta'
 
 # Azure configuration
@@ -50,19 +72,35 @@ except KeyError:
 
 LOCATION = "trial"
 
-def check_openai_api():
-    """Checks if the OpenAI (Grok) API is working."""
+def check_grok_api():
+    """Checks if the Grok API is working."""
     try:
-        client = get_client()
-        chat_completion = client.chat.completions.create(
-            messages=[{"role": "user", "content": "Test API connectivity."}],
-            model=GROQ_MODEL,
-            temperature=0.1,
-            max_tokens=50
+        headers = {
+            "Authorization": f"Bearer {GROK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": GROK_MODEL,
+            "messages": [{"role": "user", "content": "Test API connectivity."}],
+            "temperature": 0.1,
+            "max_tokens": 50
+        }
+        
+        response = requests.post(
+            f"{GROK_BASE_URL}/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=10
         )
-        return True, "OpenAI (Grok) API is working."
+        
+        if response.status_code == 200:
+            return True, "Grok API is working."
+        else:
+            return False, f"Grok API error: {response.status_code} - {response.text}"
+            
     except Exception as e:
-        return False, f"OpenAI (Grok) API error: {str(e)}"
+        return False, f"Grok API error: {str(e)}"
 
 def check_azure_api():
     """Checks if the Azure Video Indexer API is working."""
@@ -354,14 +392,14 @@ def main():
         st.header("🔧 API Status")
         
         # Check APIs
-        openai_status, openai_message = check_openai_api()
+        grok_status, grok_message = check_grok_api()
         azure_status, azure_message = check_azure_api()
         
-        if openai_status:
+        if grok_status:
             st.success("✅ Grok API Connected")
         else:
             st.error("❌ Grok API Error")
-            st.error(openai_message)
+            st.error(grok_message)
         
         if azure_status:
             st.success("✅ Azure API Connected")
@@ -389,7 +427,7 @@ def main():
             st.error("Please enter a valid YouTube URL.")
             return
             
-        if not (openai_status and azure_status):
+        if not (grok_status and azure_status):
             st.error("Cannot proceed - API connections failed. Please check your credentials.")
             return
 
