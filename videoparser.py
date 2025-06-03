@@ -1,40 +1,43 @@
 import streamlit as st
-try:
-    import yt_dlp
-except ImportError:
-    st.error("The 'yt_dlp' module is missing. Please ensure 'yt-dlp' is installed via 'pip install yt-dlp' or check your requirements.txt.")
-    st.stop()
+import yt_dlp
 import requests
 import urllib.parse
 import time
-try:
-    from youtube_transcript_api import YouTubeTranscriptApi
-except ImportError:
-    st.error("The 'youtube_transcript_api' module is missing. Please ensure 'youtube-transcript-api' is installed.")
-    st.stop()
-try:
-    from openai import OpenAI
-except ImportError:
-    st.error("The 'openai' module is missing. Please ensure 'openai' is installed.")
-    st.stop()
+from youtube_transcript_api import YouTubeTranscriptApi
+from openai import OpenAI
 from urllib.parse import urlparse, parse_qs
 import json
 import os
 import tempfile
 
+# Page configuration
+st.set_page_config(
+    page_title="YouTube Video Analyzer",
+    page_icon="🎥",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
 # Initialize OpenAI client with secrets
-try:
-    client = OpenAI(api_key=st.secrets["OPENAI"]["API_KEY"], base_url="https://api.x.ai/v1")
-except KeyError:
-    st.error("OpenAI API key is missing in secrets. Please configure it in .streamlit/secrets.toml.")
-    st.stop()
+@st.cache_resource
+def init_openai_client():
+    try:
+        return OpenAI(api_key=st.secrets["OPENAI"]["API_KEY"], base_url="https://api.x.ai/v1")
+    except KeyError:
+        st.error("OpenAI API key is missing in secrets. Please configure it in .streamlit/secrets.toml.")
+        st.stop()
+
+client = init_openai_client()
 GROQ_MODEL = 'grok-3-mini-beta'
+
+# Azure configuration
 try:
     SUBSCRIPTION_KEY = st.secrets["AZURE"]["SUBSCRIPTION_KEY"]
     ACCOUNT_ID = st.secrets["AZURE"]["ACCOUNT_ID"]
 except KeyError:
     st.error("Azure credentials are missing in secrets. Please configure SUBSCRIPTION_KEY and ACCOUNT_ID in .streamlit/secrets.toml.")
     st.stop()
+
 LOCATION = "trial"
 
 def check_openai_api():
@@ -43,22 +46,23 @@ def check_openai_api():
         chat_completion = client.chat.completions.create(
             messages=[{"role": "user", "content": "Test API connectivity."}],
             model=GROQ_MODEL,
-            temperature=0.1
+            temperature=0.1,
+            max_tokens=50
         )
         return True, "OpenAI (Grok) API is working."
     except Exception as e:
-        return False, f"OpenAI (Grok) API error: {e}"
+        return False, f"OpenAI (Grok) API error: {str(e)}"
 
 def check_azure_api():
     """Checks if the Azure Video Indexer API is working."""
     try:
         url = f"https://api.videoindexer.ai/Auth/trial/Accounts/{ACCOUNT_ID}/AccessToken?allowEdit=true"
         headers = {"Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY, "Cache-Control": "no-cache"}
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         return True, "Azure Video Indexer API is working."
     except Exception as e:
-        return False, f"Azure Video Indexer API error: {e}"
+        return False, f"Azure Video Indexer API error: {str(e)}"
 
 def extract_video_id(youtube_url):
     """Extracts the video ID from a YouTube URL."""
@@ -117,7 +121,8 @@ def get_grok_insights(transcript):
                 }
             ],
             model=GROQ_MODEL,
-            temperature=0.1
+            temperature=0.1,
+            max_tokens=2000
         )
         return chat_completion.choices[0].message.content
     except Exception as e:
@@ -127,26 +132,29 @@ def get_grok_insights(transcript):
 def download_youtube_video(youtube_url, folder):
     """Downloads a YouTube video to a temporary folder."""
     ydl_opts = {
-        'format': '18',
+        'format': '18/best[height<=480]',
         'merge_output_format': 'mp4',
         'outtmpl': f'{folder}/%(title)s.%(ext)s',
         'quiet': True,
-        'cookiesfrombrowser': ('chrome', None)
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(youtube_url, download=True)
-            return f"{folder}/{info['title']}.mp4"
+            title = info['title']
+            # Clean filename for cross-platform compatibility
+            safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            return f"{folder}/{safe_title}.mp4", safe_title
     except Exception as e:
         st.error(f"Error downloading video: {e}")
-        return None
+        return None, None
 
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def get_account_access_token():
     """Gets the Azure Video Indexer access token."""
     url = f"https://api.videoindexer.ai/Auth/trial/Accounts/{ACCOUNT_ID}/AccessToken?allowEdit=true"
     headers = {"Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY, "Cache-Control": "no-cache"}
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -155,47 +163,77 @@ def get_account_access_token():
 
 def upload_video(file_path, video_name):
     """Uploads a video to Azure Video Indexer."""
+    access_token = get_account_access_token()
+    if not access_token:
+        return None
+        
     upload_url = (
         f"https://api.videoindexer.ai/{LOCATION}/Accounts/{ACCOUNT_ID}/Videos"
-        f"?accessToken={get_account_access_token()}&name={video_name}&privacy=Private&language=English"
+        f"?accessToken={access_token}&name={video_name}&privacy=Private&language=English"
     )
     try:
         with open(file_path, 'rb') as f:
             files = {'file': (os.path.basename(file_path), f)}
-            response = requests.post(upload_url, files=files)
+            response = requests.post(upload_url, files=files, timeout=300)
             response.raise_for_status()
             return response.json()["id"]
     except Exception as e:
         st.error(f"Error uploading video: {e}")
         return None
 
-def wait_for_indexing(video_id):
+def wait_for_indexing(video_id, progress_bar=None):
     """Polls until video indexing is complete."""
+    access_token = get_account_access_token()
+    if not access_token:
+        return False
+        
     status_url = (
         f"https://api.videoindexer.ai/{LOCATION}/Accounts/{ACCOUNT_ID}/Videos/{video_id}/Index"
-        f"?accessToken={get_account_access_token()}"
+        f"?accessToken={access_token}"
     )
-    with st.spinner("Indexing video... This may take a few minutes."):
-        while True:
-            try:
-                response = requests.get(status_url)
-                response.raise_for_status()
-                state = response.json().get("state")
-                if state == "Processed":
-                    return True
-                time.sleep(10)
-            except Exception as e:
-                st.error(f"Error checking indexing status: {e}")
+    
+    max_attempts = 60  # 10 minutes max
+    attempt = 0
+    
+    while attempt < max_attempts:
+        try:
+            response = requests.get(status_url, timeout=10)
+            response.raise_for_status()
+            state = response.json().get("state")
+            
+            if progress_bar:
+                progress_bar.progress(min(attempt / max_attempts, 0.9))
+            
+            if state == "Processed":
+                if progress_bar:
+                    progress_bar.progress(1.0)
+                return True
+            elif state == "Failed":
+                st.error("Video processing failed.")
                 return False
+                
+            time.sleep(10)
+            attempt += 1
+            
+        except Exception as e:
+            st.error(f"Error checking indexing status: {e}")
+            return False
+    
+    st.error("Video indexing timed out.")
+    return False
 
 def get_insights(video_id):
     """Fetches insights from Azure Video Indexer."""
+    access_token = get_account_access_token()
+    if not access_token:
+        return None
+        
     insights_url = (
         f"https://api.videoindexer.ai/{LOCATION}/Accounts/{ACCOUNT_ID}/Videos/{video_id}/Index"
-        f"?accessToken={get_account_access_token()}"
+        f"?accessToken={access_token}"
     )
     try:
-        response = requests.get(insights_url)
+        response = requests.get(insights_url, timeout=10)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -210,117 +248,222 @@ def display_azure_insights(insights):
 
     insights_data = insights["videos"][0]["insights"]
     
-    st.subheader("Keywords")
-    keywords = insights_data.get("keywords", [])
-    if keywords:
-        st.table([{"Keyword": k["text"]} for k in keywords])
-    else:
-        st.write("No keywords detected.")
+    # Create tabs for different types of insights
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Keywords", "🏷️ Topics", "🔖 Labels", "🎬 Scenes", "📊 Stats"])
+    
+    with tab1:
+        st.subheader("Keywords")
+        keywords = insights_data.get("keywords", [])
+        if keywords:
+            # Display top keywords with confidence scores
+            keyword_data = []
+            for k in keywords[:20]:  # Limit to top 20
+                keyword_data.append({
+                    "Keyword": k["text"],
+                    "Confidence": f"{k.get('confidence', 0):.2f}",
+                    "Instances": len(k.get("instances", []))
+                })
+            st.dataframe(keyword_data, use_container_width=True)
+        else:
+            st.info("No keywords detected.")
 
-    st.subheader("Topics")
-    topics = insights_data.get("topics", [])
-    if topics:
-        st.table([{"Topic": t["name"]} for t in topics])
-    else:
-        st.write("No topics detected.")
+    with tab2:
+        st.subheader("Topics")
+        topics = insights_data.get("topics", [])
+        if topics:
+            topic_data = []
+            for t in topics:
+                topic_data.append({
+                    "Topic": t["name"],
+                    "Confidence": f"{t.get('confidence', 0):.2f}",
+                    "Language": t.get("language", "N/A")
+                })
+            st.dataframe(topic_data, use_container_width=True)
+        else:
+            st.info("No topics detected.")
 
-    st.subheader("Labels")
-    labels = insights_data.get("labels", [])
-    if labels:
-        st.table([{"Label": l["name"]} for l in labels])
-    else:
-        st.write("No labels detected.")
+    with tab3:
+        st.subheader("Labels")
+        labels = insights_data.get("labels", [])
+        if labels:
+            label_data = []
+            for l in labels[:15]:  # Limit to top 15
+                label_data.append({
+                    "Label": l["name"],
+                    "Confidence": f"{l.get('confidence', 0):.2f}",
+                    "Instances": len(l.get("instances", []))
+                })
+            st.dataframe(label_data, use_container_width=True)
+        else:
+            st.info("No labels detected.")
 
-    st.subheader("Key Moments")
-    scenes = insights_data.get("scenes", [])
-    if scenes:
-        for scene in scenes:
-            st.write(f"**Scene at {scene['start']} - {scene['end']}**")
-            st.write(scene.get("description", "No description available."))
-    else:
-        st.write("No key moments detected.")
+    with tab4:
+        st.subheader("Key Scenes")
+        scenes = insights_data.get("scenes", [])
+        if scenes:
+            for i, scene in enumerate(scenes[:10]):  # Limit to first 10 scenes
+                with st.expander(f"Scene {i+1}: {scene.get('start', '0:00')} - {scene.get('end', '0:00')}"):
+                    st.write(scene.get("description", "No description available."))
+                    
+                    # Show keyframes if available
+                    if "keyFrames" in scene:
+                        st.write("**Key Moments:**")
+                        for kf in scene["keyFrames"][:3]:  # Show first 3 keyframes
+                            st.write(f"- At {kf.get('start', '0:00')}")
+        else:
+            st.info("No key scenes detected.")
+    
+    with tab5:
+        st.subheader("Video Statistics")
+        duration = insights_data.get("duration", {})
+        stats_data = {
+            "Duration": f"{duration.get('seconds', 0)} seconds",
+            "Keywords Found": len(insights_data.get("keywords", [])),
+            "Topics Found": len(insights_data.get("topics", [])),
+            "Labels Found": len(insights_data.get("labels", [])),
+            "Scenes Found": len(insights_data.get("scenes", [])),
+            "Transcript Available": "Yes" if insights_data.get("transcript") else "No"
+        }
+        
+        col1, col2 = st.columns(2)
+        for i, (key, value) in enumerate(stats_data.items()):
+            if i % 2 == 0:
+                col1.metric(key, value)
+            else:
+                col2.metric(key, value)
 
-# Streamlit UI
-st.title("YouTube Video Analyzer")
-st.markdown("Enter a YouTube URL to get a summary and insights powered by Grok and Azure Video Indexer.")
+# Main Streamlit UI
+def main():
+    st.title("🎥 YouTube Video Analyzer")
+    st.markdown("Enter a YouTube URL to get AI-powered summaries and detailed video insights.")
 
-# API Status Check
-st.header("API Status")
-openai_status, openai_message = check_openai_api()
-azure_status, azure_message = check_azure_api()
+    # Sidebar for API status
+    with st.sidebar:
+        st.header("🔧 API Status")
+        
+        # Check APIs
+        openai_status, openai_message = check_openai_api()
+        azure_status, azure_message = check_azure_api()
+        
+        if openai_status:
+            st.success("✅ Grok API Connected")
+        else:
+            st.error("❌ Grok API Error")
+            st.error(openai_message)
+        
+        if azure_status:
+            st.success("✅ Azure API Connected")
+        else:
+            st.error("❌ Azure API Error")
+            st.error(azure_message)
+        
+        st.markdown("---")
+        st.markdown("**Features:**")
+        st.markdown("- 🤖 AI-powered summaries")
+        st.markdown("- 🔍 Keyword extraction")
+        st.markdown("- 📊 Sentiment analysis")
+        st.markdown("- 🎬 Scene detection")
+        st.markdown("- 🏷️ Topic modeling")
 
-col1, col2 = st.columns(2)
-with col1:
-    st.subheader("Grok API")
-    if openai_status:
-        st.success(openai_message)
-    else:
-        st.error(openai_message)
-with col2:
-    st.subheader("Azure API")
-    if azure_status:
-        st.success(azure_message)
-    else:
-        st.error(azure_message)
+    # Main content area
+    youtube_url = st.text_input(
+        "YouTube Video URL", 
+        placeholder="https://www.youtube.com/watch?v=...",
+        help="Paste any YouTube video URL here"
+    )
 
-# Video Analysis Section
-youtube_url = st.text_input("YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...")
-if st.button("Analyze Video"):
-    if not youtube_url:
-        st.error("Please enter a valid YouTube URL Cummulative distribution function (CDF) of the video duration in minutes is given by:
-    F(t) = 1 - e^(-0.1t), t ≥ 0
-Find the probability that the duration of a randomly selected video is between 5 and 10 minutes.
+    if st.button("🚀 Analyze Video", type="primary", use_container_width=True):
+        if not youtube_url:
+            st.error("Please enter a valid YouTube URL.")
+            return
+            
+        if not (openai_status and azure_status):
+            st.error("Cannot proceed - API connections failed. Please check your credentials.")
+            return
 
-To find the probability that the duration of a randomly selected video is between 5 and 10 minutes using the given cumulative distribution function (CDF), \( F(t) = 1 - e^{-0.1t} \) for \( t \geq 0 \), we proceed as follows:
+        # Extract video ID
+        video_id = extract_video_id(youtube_url)
+        if not video_id:
+            st.error("Invalid YouTube URL. Please check the URL and try again.")
+            return
 
-The CDF \( F(t) \) gives the probability that the video duration \( T \) is less than or equal to \( t \), i.e., \( F(t) = P(T \leq t) \). To find the probability that the duration is between 5 and 10 minutes, \( P(5 < T < 10) \), we use the property of the CDF:
+        # Create progress tracking
+        progress_container = st.container()
+        
+        with progress_container:
+            st.info("🔄 Starting analysis...")
+            progress_bar = st.progress(0)
+            status_text = st.empty()
 
-\[
-P(a < T < b) = F(b) - F(a)
-\]
+        try:
+            # Step 1: Get transcript and Grok summary
+            status_text.text("📝 Fetching transcript...")
+            progress_bar.progress(0.1)
+            
+            transcript = get_youtube_transcript(video_id)
+            if transcript:
+                status_text.text("🤖 Generating AI summary...")
+                progress_bar.progress(0.2)
+                
+                grok_summary = get_grok_insights(transcript)
+            else:
+                grok_summary = None
 
-Here, \( a = 5 \) and \( b = 10 \). So, we need to compute:
+            # Step 2: Download video
+            status_text.text("⬇️ Downloading video...")
+            progress_bar.progress(0.3)
+            
+            with tempfile.TemporaryDirectory() as temp_dir:
+                video_path, video_title = download_youtube_video(youtube_url, temp_dir)
+                
+                if video_path and os.path.exists(video_path):
+                    # Step 3: Upload to Azure
+                    status_text.text("☁️ Uploading to Azure...")
+                    progress_bar.progress(0.4)
+                    
+                    azure_video_id = upload_video(video_path, video_title or "YouTube Video")
+                    
+                    if azure_video_id:
+                        # Step 4: Wait for indexing
+                        status_text.text("🔍 Processing video (this may take a few minutes)...")
+                        
+                        if wait_for_indexing(azure_video_id, progress_bar):
+                            # Step 5: Get insights
+                            status_text.text("📊 Fetching insights...")
+                            azure_insights = get_insights(azure_video_id)
+                        else:
+                            azure_insights = None
+                    else:
+                        azure_insights = None
+                else:
+                    azure_insights = None
 
-\[
-P(5 < T < 10) = F(10) - F(5)
-\]
+            # Clear progress indicators
+            progress_container.empty()
 
-### Step 1: Compute \( F(10) \)
-Substitute \( t = 10 \) into the CDF:
+            # Display results
+            st.success("✅ Analysis complete!")
+            
+            # Create two columns for results
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                st.header("🤖 AI Summary (Grok)")
+                if grok_summary:
+                    st.markdown(grok_summary)
+                else:
+                    st.warning("Could not generate AI summary. This might be due to transcript unavailability or API issues.")
+            
+            with col2:
+                st.header("☁️ Azure Video Insights")
+                if azure_insights:
+                    display_azure_insights(azure_insights)
+                else:
+                    st.warning("Could not get Azure insights. This might be due to upload or processing issues.")
 
-\[
-F(10) = 1 - e^{-0.1 \cdot 10} = 1 - e^{-1}
-\]
+        except Exception as e:
+            progress_container.empty()
+            st.error(f"An error occurred during analysis: {str(e)}")
 
-Using the value of \( e^{-1} \approx 0.367879 \):
-
-\[
-F(10) = 1 - 0.367879 = 0.632121
-\]
-
-### Step 2: Compute \( F(5) \)
-Substitute \( t = 5 \) into the CDF:
-
-\[
-F(5) = 1 - e^{-0.1 \cdot 5} = 1 - e^{-0.5}
-\]
-
-Using the value of \( e^{-0.5} \approx 0.606531 \):
-
-\[
-F(5) = 1 - 0.606531 = 0.393469
-\]
-
-### Step 3: Compute the Probability
-Now, subtract \( F(5) \) from \( F(10) \):
-
-\[
-P(5 < T < 10) = F(10) - F(5) = 0.632121 - 0.393469 = 0.238652
-\]
-
-### Final Answer
-The probability that the duration of a randomly selected video is between 5 and 10 minutes is approximately:
-
-\[
-\boxed{0.239}
-\]
+if __name__ == "__main__":
+    main()
