@@ -8,6 +8,8 @@ from urllib.parse import urlparse, parse_qs
 import json
 import os
 import tempfile
+import uuid
+from datetime import datetime
 
 # Page configuration
 st.set_page_config(
@@ -87,7 +89,6 @@ def check_youtube_api():
         if not api_key:
             return False, "YouTube API key not found in secrets"
             
-        # Test API with a simple request
         url = f"https://www.googleapis.com/youtube/v3/videos?part=snippet&id=dQw4w9WgXcQ&key={api_key}"
         response = requests.get(url, timeout=10)
         
@@ -169,7 +170,8 @@ def get_youtube_transcript(video_id):
             transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
             transcript = ' '.join([entry['text'] for entry in transcript_list])
             return transcript
-        except:
+        except Exception as e:
+            st.warning(f"English transcript not available: {e}")
             # If English not available, try to get any available transcript and translate to English
             try:
                 # Get list of available transcripts
@@ -191,13 +193,14 @@ def get_youtube_transcript(video_id):
                             if transcript.language_code != 'en':
                                 st.info(f"📝 Using transcript in {transcript.language}")
                             return transcript_text
-                    except:
+                    except Exception as e:
+                        st.warning(f"Failed to process transcript in {transcript.language}: {e}")
                         continue
                 
                 # If no translatable transcript found, use the first available one
-                transcript = transcript_list._manually_created_transcripts or transcript_list._generated_transcripts
-                if transcript:
-                    first_transcript = list(transcript.values())[0]
+                transcript_dict = transcript_list._manually_created_transcripts or transcript_list._generated_transcripts
+                if transcript_dict:
+                    first_transcript = list(transcript_dict.values())[0]
                     transcript_data = first_transcript.fetch()
                     transcript_text = ' '.join([entry['text'] for entry in transcript_data])
                     st.info(f"📝 Using transcript in {first_transcript.language}")
@@ -220,7 +223,6 @@ def get_grok_insights(transcript, video_info=None):
         if not api_key:
             return "Grok API key not found in secrets"
         
-        # Enhanced prompt with video context if available
         system_prompt = """
         You are a smart YouTube transcript summarizer. Your job is to read the full transcript of a video and return:
 
@@ -241,7 +243,6 @@ def get_grok_insights(transcript, video_info=None):
         
         user_content = f"Give me the summary of this transcript: {transcript}"
         
-        # Add video context if available
         if video_info:
             context = f"""
             Video Context:
@@ -304,14 +305,13 @@ def download_youtube_video(youtube_url, folder):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(youtube_url, download=True)
             title = info['title']
-            # Clean filename for cross-platform compatibility
             safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).rstrip()
             return f"{folder}/{safe_title}.mp4", safe_title
     except Exception as e:
         st.error(f"Error downloading video: {e}")
         return None, None
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+@st.cache_data(ttl=3600)
 def get_account_access_token():
     """Gets the Azure Video Indexer access token."""
     url = f"https://api.videoindexer.ai/Auth/trial/Accounts/{ACCOUNT_ID}/AccessToken?allowEdit=true"
@@ -325,14 +325,18 @@ def get_account_access_token():
         return None
 
 def upload_video(file_path, video_name):
-    """Uploads a video to Azure Video Indexer."""
+    """Uploads a video to Azure Video Indexer with a unique name to avoid conflicts."""
     access_token = get_account_access_token()
     if not access_token:
         return None
         
+    # Append a unique identifier to the video name
+    unique_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    safe_video_name = f"{video_name}_{unique_id}"[:100]  # Limit length to avoid issues
+    
     upload_url = (
         f"https://api.videoindexer.ai/{LOCATION}/Accounts/{ACCOUNT_ID}/Videos"
-        f"?accessToken={access_token}&name={video_name}&privacy=Private&language=English"
+        f"?accessToken={access_token}&name={urllib.parse.quote(safe_video_name)}&privacy=Private&language=English"
     )
     try:
         with open(file_path, 'rb') as f:
@@ -340,6 +344,9 @@ def upload_video(file_path, video_name):
             response = requests.post(upload_url, files=files, timeout=300)
             response.raise_for_status()
             return response.json()["id"]
+    except requests.exceptions.HTTPError as e:
+        st.error(f"Error uploading video: {e.response.status_code} - {e.response.text}")
+        return None
     except Exception as e:
         st.error(f"Error uploading video: {e}")
         return None
@@ -355,7 +362,7 @@ def wait_for_indexing(video_id, progress_bar=None):
         f"?accessToken={access_token}"
     )
     
-    max_attempts = 60  # 10 minutes max
+    max_attempts = 60
     attempt = 0
     
     while attempt < max_attempts:
@@ -411,16 +418,14 @@ def display_azure_insights(insights):
 
     insights_data = insights["videos"][0]["insights"]
     
-    # Create tabs for different types of insights
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Keywords", "🏷️ Topics", "🔖 Labels", "🎬 Scenes", "📊 Stats"])
     
     with tab1:
         st.subheader("Keywords")
         keywords = insights_data.get("keywords", [])
         if keywords:
-            # Display top keywords with confidence scores
             keyword_data = []
-            for k in keywords[:20]:  # Limit to top 20
+            for k in keywords[:20]:
                 keyword_data.append({
                     "Keyword": k["text"],
                     "Confidence": f"{k.get('confidence', 0):.2f}",
@@ -450,7 +455,7 @@ def display_azure_insights(insights):
         labels = insights_data.get("labels", [])
         if labels:
             label_data = []
-            for l in labels[:15]:  # Limit to top 15
+            for l in labels[:15]:
                 label_data.append({
                     "Label": l["name"],
                     "Confidence": f"{l.get('confidence', 0):.2f}",
@@ -464,14 +469,13 @@ def display_azure_insights(insights):
         st.subheader("Key Scenes")
         scenes = insights_data.get("scenes", [])
         if scenes:
-            for i, scene in enumerate(scenes[:10]):  # Limit to first 10 scenes
+            for i, scene in enumerate(scenes[:10]):
                 with st.expander(f"Scene {i+1}: {scene.get('start', '0:00')} - {scene.get('end', '0:00')}"):
                     st.write(scene.get("description", "No description available."))
                     
-                    # Show keyframes if available
                     if "keyFrames" in scene:
                         st.write("**Key Moments:**")
-                        for kf in scene["keyFrames"][:3]:  # Show first 3 keyframes
+                        for kf in scene["keyFrames"][:3]:
                             st.write(f"- At {kf.get('start', '0:00')}")
         else:
             st.info("No key scenes detected.")
@@ -500,11 +504,9 @@ def main():
     st.title("🎥 YouTube Video Analyzer")
     st.markdown("Enter a YouTube URL to get AI-powered summaries and detailed video insights.")
 
-    # Sidebar for API status
     with st.sidebar:
         st.header("🔧 API Status")
         
-        # Check APIs
         grok_status, grok_message = check_grok_api()
         youtube_status, youtube_message = check_youtube_api()
         azure_status, azure_message = check_azure_api()
@@ -535,7 +537,6 @@ def main():
         st.markdown("- 🎬 Scene detection")
         st.markdown("- 🏷️ Topic modeling")
 
-    # Main content area
     youtube_url = st.text_input(
         "YouTube Video URL", 
         placeholder="https://www.youtube.com/watch?v=...",
@@ -551,13 +552,11 @@ def main():
             st.error("Cannot proceed - API connections failed. Please check your credentials.")
             return
 
-        # Extract video ID first
         video_id = extract_video_id(youtube_url)
         if not video_id:
             st.error("Invalid YouTube URL. Please check the URL and try again.")
             return
 
-        # Get YouTube video information
         st.info("📹 Fetching video information...")
         video_info = get_youtube_video_info(video_id)
         if video_info:
@@ -565,13 +564,14 @@ def main():
         else:
             st.warning("Could not fetch video information from YouTube API")
 
-        # Create progress tracking
         progress_container = st.container()
         
         with progress_container:
             st.info("🔄 Starting analysis...")
             progress_bar = st.progress(0)
             status_text = st.empty()
+
+        analysis_success = True
 
         try:
             # Step 1: Get transcript and Grok summary
@@ -584,8 +584,13 @@ def main():
                 progress_bar.progress(0.2)
                 
                 grok_summary = get_grok_insights(transcript, video_info)
+                if not grok_summary:
+                    analysis_success = False
+                    st.warning("Failed to generate Grok summary.")
             else:
                 grok_summary = None
+                analysis_success = False
+                st.warning("No transcript available for this video.")
 
             # Step 2: Download video
             status_text.text("⬇️ Downloading video...")
@@ -609,23 +614,33 @@ def main():
                             # Step 5: Get insights
                             status_text.text("📊 Fetching insights...")
                             azure_insights = get_insights(azure_video_id)
+                            if not azure_insights:
+                                analysis_success = False
+                                st.warning("Failed to fetch Azure insights.")
                         else:
                             azure_insights = None
+                            analysis_success = False
+                            st.warning("Azure video indexing failed.")
                     else:
                         azure_insights = None
+                        analysis_success = False
+                        st.warning("Failed to upload video to Azure.")
                 else:
                     azure_insights = None
+                    analysis_success = False
+                    st.warning("Failed to download video.")
 
             # Clear progress indicators
             progress_container.empty()
 
             # Display results
-            st.success("✅ Analysis complete!")
+            if analysis_success:
+                st.success("✅ Analysis complete!")
+            else:
+                st.warning("⚠️ Analysis completed with errors. Some results may be missing.")
             
-            # Create three columns for results
             col1, col2 = st.columns([1, 1])
             
-            # Display video info if available
             if video_info:
                 st.header("📹 Video Information")
                 info_col1, info_col2, info_col3 = st.columns(3)
@@ -642,10 +657,9 @@ def main():
                     st.metric("📺 Channel", video_info['channel_title'])
                     st.metric("📅 Published", video_info['published_at'][:10])
                 
-                # Show tags if available
                 if video_info.get('tags'):
                     st.subheader("🏷️ Video Tags")
-                    tags_text = ", ".join(video_info['tags'][:10])  # Show first 10 tags
+                    tags_text = ", ".join(video_info['tags'][:10])
                     st.write(tags_text)
                 
                 st.markdown("---")
@@ -666,7 +680,8 @@ def main():
 
         except Exception as e:
             progress_container.empty()
-            st.error(f"An error occurred during analysis: {str(e)}")
+            st.error(f"An unexpected error occurred during analysis: {str(e)}")
+            analysis_success = False
 
 if __name__ == "__main__":
     main()
