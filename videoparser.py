@@ -98,6 +98,7 @@ def check_youtube_api():
             
     except Exception as e:
         return False, f"YouTube API error: {str(e)}"
+
 def check_azure_api():
     """Checks if the Azure Video Indexer API is working."""
     try:
@@ -550,6 +551,12 @@ def main():
             st.error("Cannot proceed - API connections failed. Please check your credentials.")
             return
 
+        # Extract video ID first
+        video_id = extract_video_id(youtube_url)
+        if not video_id:
+            st.error("Invalid YouTube URL. Please check the URL and try again.")
+            return
+
         # Get YouTube video information
         st.info("📹 Fetching video information...")
         video_info = get_youtube_video_info(video_id)
@@ -557,12 +564,6 @@ def main():
             st.success(f"📹 Video: {video_info['title']} by {video_info['channel_title']}")
         else:
             st.warning("Could not fetch video information from YouTube API")
-
-        # Extract video ID
-        video_id = extract_video_id(youtube_url)
-        if not video_id:
-            st.error("Invalid YouTube URL. Please check the URL and try again.")
-            return
 
         # Create progress tracking
         progress_container = st.container()
