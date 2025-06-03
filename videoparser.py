@@ -29,6 +29,14 @@ except KeyError:
     st.error("Azure credentials are missing in secrets. Please configure SUBSCRIPTION_KEY and ACCOUNT_ID in .streamlit/secrets.toml.")
     st.stop()
 
+# YouTube API configuration
+def get_youtube_api_key():
+    """Get YouTube API key from secrets"""
+    try:
+        return st.secrets["YOUTUBE"]["API_KEY"]
+    except KeyError:
+        return None
+
 LOCATION = "trial"
 
 def get_grok_api_key():
@@ -72,6 +80,24 @@ def check_grok_api():
     except Exception as e:
         return False, f"Grok API error: {str(e)}"
 
+def check_youtube_api():
+    """Checks if the YouTube Data API is working."""
+    try:
+        api_key = get_youtube_api_key()
+        if not api_key:
+            return False, "YouTube API key not found in secrets"
+            
+        # Test API with a simple request
+        url = f"https://www.googleapis.com/youtube/v3/videos?part=snippet&id=dQw4w9WgXcQ&key={api_key}"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code == 200:
+            return True, "YouTube API is working."
+        else:
+            return False, f"YouTube API error: {response.status_code}"
+            
+    except Exception as e:
+        return False, f"YouTube API error: {str(e)}"
 def check_azure_api():
     """Checks if the Azure Video Indexer API is working."""
     try:
@@ -82,6 +108,43 @@ def check_azure_api():
         return True, "Azure Video Indexer API is working."
     except Exception as e:
         return False, f"Azure Video Indexer API error: {str(e)}"
+
+def get_youtube_video_info(video_id):
+    """Get detailed video information from YouTube Data API."""
+    try:
+        api_key = get_youtube_api_key()
+        if not api_key:
+            return None
+            
+        url = f"https://www.googleapis.com/youtube/v3/videos"
+        params = {
+            'part': 'snippet,statistics,contentDetails',
+            'id': video_id,
+            'key': api_key
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data['items']:
+                video_info = data['items'][0]
+                return {
+                    'title': video_info['snippet']['title'],
+                    'description': video_info['snippet']['description'],
+                    'channel_title': video_info['snippet']['channelTitle'],
+                    'published_at': video_info['snippet']['publishedAt'],
+                    'view_count': video_info['statistics'].get('viewCount', 'N/A'),
+                    'like_count': video_info['statistics'].get('likeCount', 'N/A'),
+                    'comment_count': video_info['statistics'].get('commentCount', 'N/A'),
+                    'duration': video_info['contentDetails']['duration'],
+                    'tags': video_info['snippet'].get('tags', []),
+                    'category_id': video_info['snippet']['categoryId']
+                }
+        return None
+    except Exception as e:
+        st.warning(f"Could not fetch YouTube video info: {e}")
+        return None
 
 def extract_video_id(youtube_url):
     """Extracts the video ID from a YouTube URL."""
@@ -98,23 +161,96 @@ def extract_video_id(youtube_url):
         return None
 
 def get_youtube_transcript(video_id):
-    """Fetches the transcript for a given YouTube video ID."""
+    """Fetches the transcript for a given YouTube video ID with fallback language support."""
     try:
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-        transcript = ' '.join([entry['text'] for entry in transcript_list])
-        return transcript
+        # First, try to get English transcript directly
+        try:
+            transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+            transcript = ' '.join([entry['text'] for entry in transcript_list])
+            return transcript
+        except:
+            # If English not available, try to get any available transcript and translate to English
+            try:
+                # Get list of available transcripts
+                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                
+                # Try to find any available transcript (preferably manually created)
+                for transcript in transcript_list:
+                    try:
+                        # If it's translatable, translate to English
+                        if transcript.is_translatable:
+                            english_transcript = transcript.translate('en').fetch()
+                            transcript_text = ' '.join([entry['text'] for entry in english_transcript])
+                            st.info(f"📝 Transcript translated from {transcript.language} to English")
+                            return transcript_text
+                        # If it's already in a language we can work with
+                        elif transcript.language_code in ['en', 'hi']:
+                            transcript_data = transcript.fetch()
+                            transcript_text = ' '.join([entry['text'] for entry in transcript_data])
+                            if transcript.language_code != 'en':
+                                st.info(f"📝 Using transcript in {transcript.language}")
+                            return transcript_text
+                    except:
+                        continue
+                
+                # If no translatable transcript found, use the first available one
+                transcript = transcript_list._manually_created_transcripts or transcript_list._generated_transcripts
+                if transcript:
+                    first_transcript = list(transcript.values())[0]
+                    transcript_data = first_transcript.fetch()
+                    transcript_text = ' '.join([entry['text'] for entry in transcript_data])
+                    st.info(f"📝 Using transcript in {first_transcript.language}")
+                    return transcript_text
+                    
+            except Exception as inner_e:
+                st.warning(f"Could not fetch any transcript: {inner_e}")
+                return None
+                
     except Exception as e:
         st.warning(f"Could not fetch transcript: {e}")
         return None
 
-def get_grok_insights(transcript):
-    """Sends the transcript to the Grok API for insights."""
+def get_grok_insights(transcript, video_info=None):
+    """Sends the transcript to the Grok API for insights with optional video context."""
     if not transcript:
         return None
     try:
         api_key = get_grok_api_key()
         if not api_key:
             return "Grok API key not found in secrets"
+        
+        # Enhanced prompt with video context if available
+        system_prompt = """
+        You are a smart YouTube transcript summarizer. Your job is to read the full transcript of a video and return:
+
+        1. A short summary of the overall video (5-6 sentences).
+        2. Bullet-pointed highlights of key takeaways, structured and concise.
+        3. (Optional) Timestamps if they are included in the transcript.
+        4. Sentiment analysis of the summary.
+
+        Guidelines:
+        - Focus on clarity and information value such as numbers and statistics.
+        - Ignore filler, repetition, or casual phrases.
+        - Highlight important ideas, tips, steps, or arguments.
+        - If the transcript is long, break it into parts and summarize each before merging.
+        - For sentiment, classify as Positive, Negative, or Neutral with a brief explanation.
+
+        NEVER summarize the YouTube title or guess content — only work from the transcript provided.
+        """
+        
+        user_content = f"Give me the summary of this transcript: {transcript}"
+        
+        # Add video context if available
+        if video_info:
+            context = f"""
+            Video Context:
+            - Title: {video_info.get('title', 'N/A')}
+            - Channel: {video_info.get('channel_title', 'N/A')}
+            - Views: {video_info.get('view_count', 'N/A')}
+            - Duration: {video_info.get('duration', 'N/A')}
+            
+            """
+            user_content = context + user_content
             
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -126,27 +262,11 @@ def get_grok_insights(transcript):
             "messages": [
                 {
                     "role": "system",
-                    "content": """
-                    You are a smart YouTube transcript summarizer. Your job is to read the full transcript of a video and return:
-
-                    1. A short summary of the overall video (5-6 sentences).
-                    2. Bullet-pointed highlights of key takeaways, structured and concise.
-                    3. (Optional) Timestamps if they are included in the transcript.
-                    4. Sentiment analysis of the summary.
-
-                    Guidelines:
-                    - Focus on clarity and information value such as numbers and statistics.
-                    - Ignore filler, repetition, or casual phrases.
-                    - Highlight important ideas, tips, steps, or arguments.
-                    - If the transcript is long, break it into parts and summarize each before merging.
-                    - For sentiment, classify as Positive, Negative, or Neutral with a brief explanation.
-
-                    NEVER summarize the YouTube title or guess content — only work from the transcript provided.
-                    """
+                    "content": system_prompt
                 },
                 {
                     "role": "user",
-                    "content": "Give me the summary of this transcript: " + transcript
+                    "content": user_content
                 }
             ],
             "temperature": 0.1,
@@ -385,6 +505,7 @@ def main():
         
         # Check APIs
         grok_status, grok_message = check_grok_api()
+        youtube_status, youtube_message = check_youtube_api()
         azure_status, azure_message = check_azure_api()
         
         if grok_status:
@@ -392,6 +513,12 @@ def main():
         else:
             st.error("❌ Grok API Error")
             st.error(grok_message)
+            
+        if youtube_status:
+            st.success("✅ YouTube API Connected")
+        else:
+            st.error("❌ YouTube API Error")
+            st.error(youtube_message)
         
         if azure_status:
             st.success("✅ Azure API Connected")
@@ -419,9 +546,17 @@ def main():
             st.error("Please enter a valid YouTube URL.")
             return
             
-        if not (grok_status and azure_status):
+        if not (grok_status and youtube_status and azure_status):
             st.error("Cannot proceed - API connections failed. Please check your credentials.")
             return
+
+        # Get YouTube video information
+        st.info("📹 Fetching video information...")
+        video_info = get_youtube_video_info(video_id)
+        if video_info:
+            st.success(f"📹 Video: {video_info['title']} by {video_info['channel_title']}")
+        else:
+            st.warning("Could not fetch video information from YouTube API")
 
         # Extract video ID
         video_id = extract_video_id(youtube_url)
@@ -447,7 +582,7 @@ def main():
                 status_text.text("🤖 Generating AI summary...")
                 progress_bar.progress(0.2)
                 
-                grok_summary = get_grok_insights(transcript)
+                grok_summary = get_grok_insights(transcript, video_info)
             else:
                 grok_summary = None
 
@@ -486,8 +621,33 @@ def main():
             # Display results
             st.success("✅ Analysis complete!")
             
-            # Create two columns for results
+            # Create three columns for results
             col1, col2 = st.columns([1, 1])
+            
+            # Display video info if available
+            if video_info:
+                st.header("📹 Video Information")
+                info_col1, info_col2, info_col3 = st.columns(3)
+                
+                with info_col1:
+                    st.metric("👀 Views", f"{int(video_info['view_count']):,}" if video_info['view_count'].isdigit() else video_info['view_count'])
+                    st.metric("👍 Likes", f"{int(video_info['like_count']):,}" if video_info['like_count'].isdigit() else video_info['like_count'])
+                
+                with info_col2:
+                    st.metric("💬 Comments", f"{int(video_info['comment_count']):,}" if video_info['comment_count'].isdigit() else video_info['comment_count'])
+                    st.metric("⏱️ Duration", video_info['duration'])
+                    
+                with info_col3:
+                    st.metric("📺 Channel", video_info['channel_title'])
+                    st.metric("📅 Published", video_info['published_at'][:10])
+                
+                # Show tags if available
+                if video_info.get('tags'):
+                    st.subheader("🏷️ Video Tags")
+                    tags_text = ", ".join(video_info['tags'][:10])  # Show first 10 tags
+                    st.write(tags_text)
+                
+                st.markdown("---")
             
             with col1:
                 st.header("🤖 AI Summary (Grok)")
