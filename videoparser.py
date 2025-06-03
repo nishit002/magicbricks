@@ -22,12 +22,22 @@ st.set_page_config(
 @st.cache_resource
 def init_openai_client():
     try:
-        return OpenAI(api_key=st.secrets["OPENAI"]["API_KEY"], base_url="https://api.x.ai/v1")
+        # Initialize client with minimal parameters to avoid compatibility issues
+        return OpenAI(
+            api_key=st.secrets["OPENAI"]["API_KEY"], 
+            base_url="https://api.x.ai/v1",
+            timeout=30.0
+        )
     except KeyError:
         st.error("OpenAI API key is missing in secrets. Please configure it in .streamlit/secrets.toml.")
         st.stop()
+    except Exception as e:
+        st.error(f"Error initializing OpenAI client: {e}")
+        st.stop()
 
-client = init_openai_client()
+# Initialize client only when needed
+def get_client():
+    return init_openai_client()
 GROQ_MODEL = 'grok-3-mini-beta'
 
 # Azure configuration
@@ -43,6 +53,7 @@ LOCATION = "trial"
 def check_openai_api():
     """Checks if the OpenAI (Grok) API is working."""
     try:
+        client = get_client()
         chat_completion = client.chat.completions.create(
             messages=[{"role": "user", "content": "Test API connectivity."}],
             model=GROQ_MODEL,
@@ -93,6 +104,7 @@ def get_grok_insights(transcript):
     if not transcript:
         return None
     try:
+        client = get_client()
         chat_completion = client.chat.completions.create(
             messages=[
                 {
