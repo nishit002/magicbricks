@@ -75,8 +75,12 @@ LOCATION = "trial"
 def check_grok_api():
     """Checks if the Grok API is working."""
     try:
+        grok_api_key = get_grok_api_key()
+        if not grok_api_key:
+            return False, "Grok API key not found in secrets"
+            
         headers = {
-            "Authorization": f"Bearer {GROK_API_KEY}",
+            "Authorization": f"Bearer {grok_api_key}",
             "Content-Type": "application/json"
         }
         
