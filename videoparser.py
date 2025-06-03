@@ -17,50 +17,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Initialize OpenAI client with secrets
-@st.cache_resource
-def init_openai_client():
-    try:
-        # Try different initialization methods to handle compatibility issues
-        api_key = st.secrets["OPENAI"]["API_KEY"]
-        base_url = "https://api.x.ai/v1"
-        
-        # Method 1: Basic initialization
-        try:
-            return OpenAI(
-                api_key=api_key,
-                base_url=base_url
-            )
-        except TypeError:
-            # Method 2: Try with explicit parameters only
-            try:
-                import openai
-                client = openai.OpenAI()
-                client.api_key = api_key
-                client.base_url = base_url
-                return client
-            except:
-                # Method 3: Manual configuration
-                os.environ["OPENAI_API_KEY"] = api_key
-                os.environ["OPENAI_BASE_URL"] = base_url
-                return OpenAI()
-                
-    except KeyError:
-        st.error("OpenAI API key is missing in secrets. Please configure it in .streamlit/secrets.toml.")
-        st.stop()
-    except Exception as e:
-        st.error(f"Error initializing OpenAI client: {e}")
-        # Return None instead of stopping, so we can handle this gracefully
-        return None
-
-# Initialize client only when needed
-def get_client():
-    client = init_openai_client()
-    if client is None:
-        st.error("Could not initialize OpenAI client. Please check your configuration.")
-        return None
-    return client
-GROQ_MODEL = 'grok-3-mini-beta'
+# Grok API configuration
+GROK_MODEL = 'grok-3-mini-beta'
+GROK_BASE_URL = "https://api.x.ai/v1"
 
 # Azure configuration
 try:
@@ -72,23 +31,30 @@ except KeyError:
 
 LOCATION = "trial"
 
+def get_grok_api_key():
+    """Get Grok API key from secrets"""
+    try:
+        return st.secrets["GROK"]["API_KEY"]
+    except KeyError:
+        return None
+
 def check_grok_api():
     """Checks if the Grok API is working."""
     try:
-        grok_api_key = get_grok_api_key()
-        if not grok_api_key:
+        api_key = get_grok_api_key()
+        if not api_key:
             return False, "Grok API key not found in secrets"
             
         headers = {
-            "Authorization": f"Bearer {grok_api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         
         payload = {
             "model": GROK_MODEL,
-            "messages": [{"role": "user", "content": "Test API connectivity."}],
+            "messages": [{"role": "user", "content": "Test"}],
             "temperature": 0.1,
-            "max_tokens": 50
+            "max_tokens": 10
         }
         
         response = requests.post(
@@ -101,7 +67,7 @@ def check_grok_api():
         if response.status_code == 200:
             return True, "Grok API is working."
         else:
-            return False, f"Grok API error: {response.status_code} - {response.text}"
+            return False, f"Grok API error: {response.status_code}"
             
     except Exception as e:
         return False, f"Grok API error: {str(e)}"
@@ -142,13 +108,22 @@ def get_youtube_transcript(video_id):
         return None
 
 def get_grok_insights(transcript):
-    """Sends the transcript to the Groq API for insights."""
+    """Sends the transcript to the Grok API for insights."""
     if not transcript:
         return None
     try:
-        client = get_client()
-        chat_completion = client.chat.completions.create(
-            messages=[
+        api_key = get_grok_api_key()
+        if not api_key:
+            return "Grok API key not found in secrets"
+            
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": GROK_MODEL,
+            "messages": [
                 {
                     "role": "system",
                     "content": """
@@ -174,13 +149,26 @@ def get_grok_insights(transcript):
                     "content": "Give me the summary of this transcript: " + transcript
                 }
             ],
-            model=GROQ_MODEL,
-            temperature=0.1,
-            max_tokens=2000
+            "temperature": 0.1,
+            "max_tokens": 2000
+        }
+        
+        response = requests.post(
+            f"{GROK_BASE_URL}/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=60
         )
-        return chat_completion.choices[0].message.content
+        
+        if response.status_code == 200:
+            result = response.json()
+            return result['choices'][0]['message']['content']
+        else:
+            st.error(f"Grok API error: {response.status_code} - {response.text}")
+            return None
+            
     except Exception as e:
-        st.error(f"Error calling Groq API: {e}")
+        st.error(f"Error calling Grok API: {e}")
         return None
 
 def download_youtube_video(youtube_url, folder):
