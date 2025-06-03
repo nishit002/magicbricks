@@ -1,20 +1,40 @@
 import streamlit as st
-import yt_dlp
+try:
+    import yt_dlp
+except ImportError:
+    st.error("The 'yt_dlp' module is missing. Please ensure 'yt-dlp' is installed via 'pip install yt-dlp' or check your requirements.txt.")
+    st.stop()
 import requests
 import urllib.parse
 import time
-from youtube_transcript_api import YouTubeTranscriptApi
-from openai import OpenAI
+try:
+    from youtube_transcript_api import YouTubeTranscriptApi
+except ImportError:
+    st.error("The 'youtube_transcript_api' module is missing. Please ensure 'youtube-transcript-api' is installed.")
+    st.stop()
+try:
+    from openai import OpenAI
+except ImportError:
+    st.error("The 'openai' module is missing. Please ensure 'openai' is installed.")
+    st.stop()
 from urllib.parse import urlparse, parse_qs
 import json
 import os
 import tempfile
 
 # Initialize OpenAI client with secrets
-client = OpenAI(api_key=st.secrets["OPENAI"]["API_KEY"], base_url="https://api.x.ai/v1")
+try:
+    client = OpenAI(api_key=st.secrets["OPENAI"]["API_KEY"], base_url="https://api.x.ai/v1")
+except KeyError:
+    st.error("OpenAI API key is missing in secrets. Please configure it in .streamlit/secrets.toml.")
+    st.stop()
 GROQ_MODEL = 'grok-3-mini-beta'
-SUBSCRIPTION_KEY = st.secrets["AZURE"]["SUBSCRIPTION_KEY"]
-ACCOUNT_ID = st.secrets["AZURE"]["ACCOUNT_ID"]
+try:
+    SUBSCRIPTION_KEY = st.secrets["AZURE"]["SUBSCRIPTION_KEY"]
+    ACCOUNT_ID = st.secrets["AZURE"]["ACCOUNT_ID"]
+except KeyError:
+    st.error("Azure credentials are missing in secrets. Please configure SUBSCRIPTION_KEY and ACCOUNT_ID in .streamlit/secrets.toml.")
+    st.stop()
 LOCATION = "trial"
 
 def check_openai_api():
