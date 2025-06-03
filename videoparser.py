@@ -9,7 +9,6 @@ import json
 import os
 import tempfile
 import uuid
-from datetime import datetime
 
 # Page configuration
 st.set_page_config(
@@ -163,55 +162,78 @@ def extract_video_id(youtube_url):
         return None
 
 def get_youtube_transcript(video_id):
-    """Fetches the transcript for a given YouTube video ID with fallback language support."""
+    """Fetches the transcript for a given YouTube video ID with fallback and retries."""
+    max_retries = 2
+    retry_delay = 2  # seconds
+
     try:
-        # First, try to get English transcript directly
-        try:
-            transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
-            transcript = ' '.join([entry['text'] for entry in transcript_list])
-            return transcript
-        except Exception as e:
-            st.warning(f"English transcript not available: {e}")
-            # If English not available, try to get any available transcript and translate to English
+        # Try English transcript first
+        for attempt in range(max_retries):
             try:
-                # Get list of available transcripts
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                
-                # Try to find any available transcript (preferably manually created)
-                for transcript in transcript_list:
+                transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+                transcript = ' '.join([entry['text'] for entry in transcript_list])
+                return transcript
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    st.warning(f"Attempt {attempt + 1} failed to fetch English transcript: {e}. Retrying...")
+                    time.sleep(retry_delay)
+                else:
+                    st.warning(f"English transcript not available: {e}")
+                    break
+
+        # Fallback to other transcripts
+        try:
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            available_transcripts = list(transcript_list)
+
+            for transcript in available_transcripts:
+                for attempt in range(max_retries):
                     try:
-                        # If it's translatable, translate to English
                         if transcript.is_translatable:
+                            # Try translating to English
                             english_transcript = transcript.translate('en').fetch()
                             transcript_text = ' '.join([entry['text'] for entry in english_transcript])
                             st.info(f"📝 Transcript translated from {transcript.language} to English")
                             return transcript_text
-                        # If it's already in a language we can work with
                         elif transcript.language_code in ['en', 'hi']:
+                            # Use directly if in supported language
                             transcript_data = transcript.fetch()
                             transcript_text = ' '.join([entry['text'] for entry in transcript_data])
                             if transcript.language_code != 'en':
                                 st.info(f"📝 Using transcript in {transcript.language}")
                             return transcript_text
                     except Exception as e:
-                        st.warning(f"Failed to process transcript in {transcript.language}: {e}")
-                        continue
-                
-                # If no translatable transcript found, use the first available one
-                transcript_dict = transcript_list._manually_created_transcripts or transcript_list._generated_transcripts
-                if transcript_dict:
-                    first_transcript = list(transcript_dict.values())[0]
-                    transcript_data = first_transcript.fetch()
-                    transcript_text = ' '.join([entry['text'] for entry in transcript_data])
-                    st.info(f"📝 Using transcript in {first_transcript.language}")
-                    return transcript_text
-                    
-            except Exception as inner_e:
-                st.warning(f"Could not fetch any transcript: {inner_e}")
-                return None
-                
+                        if attempt < max_retries - 1:
+                            st.warning(f"Attempt {attempt + 1} failed to process {transcript.language} transcript: {e}. Retrying...")
+                            time.sleep(retry_delay)
+                        else:
+                            st.warning(f"Failed to process transcript in {transcript.language}: {e}")
+                            break
+
+            # Final fallback: Use first available transcript
+            transcript_dict = transcript_list._manually_created_transcripts or transcript_list._generated_transcripts
+            if transcript_dict:
+                first_transcript = list(transcript_dict.values())[0]
+                for attempt in range(max_retries):
+                    try:
+                        transcript_data = first_transcript.fetch()
+                        transcript_text = ' '.join([entry['text'] for entry in transcript_data])
+                        st.info(f"📝 Using transcript in {first_transcript.language}")
+                        return transcript_text
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            st.warning(f"Attempt {attempt + 1} failed to fetch {first_transcript.language} transcript: {e}. Retrying...")
+                            time.sleep(retry_delay)
+                        else:
+                            st.warning(f"Failed to fetch transcript in {first_transcript.language}: {e}")
+                            break
+
+        except Exception as e:
+            st.warning(f"Could not fetch any transcript: {e}")
+            return None
+
     except Exception as e:
-        st.warning(f"Could not fetch transcript: {e}")
+        st.warning(f"Unexpected error fetching transcript: {e}")
         return None
 
 def get_grok_insights(transcript, video_info=None):
@@ -325,14 +347,16 @@ def get_account_access_token():
         return None
 
 def upload_video(file_path, video_name):
-    """Uploads a video to Azure Video Indexer with a unique name to avoid conflicts."""
+    """Uploads a video to Azure Video Indexer with a name within 80 characters."""
     access_token = get_account_access_token()
     if not access_token:
         return None
         
-    # Append a unique identifier to the video name
-    unique_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
-    safe_video_name = f"{video_name}_{unique_id}"[:100]  # Limit length to avoid issues
+    # Truncate base video name to 50 characters to leave room for unique ID
+    base_name = video_name[:50]
+    # Append a short unique identifier
+    unique_id = uuid.uuid4().hex[:8]
+    safe_video_name = f"{base_name}_{unique_id}"[:80]  # Ensure total length <= 80
     
     upload_url = (
         f"https://api.videoindexer.ai/{LOCATION}/Accounts/{ACCOUNT_ID}/Videos"
@@ -590,7 +614,7 @@ def main():
             else:
                 grok_summary = None
                 analysis_success = False
-                st.warning("No transcript available for this video.")
+                st.warning("No transcript available for this video. Ensure captions are enabled.")
 
             # Step 2: Download video
             status_text.text("⬇️ Downloading video...")
