@@ -714,4 +714,28 @@ def main():
             
             # Display results
             success_count = sum([
-                bool(
+                bool(results['video_info']),
+                bool(results['transcript']),
+                bool(results['grok_analysis']),
+                bool(results['azure_insights'])
+            ])
+            
+            if success_count >= 2:
+                st.success(f"✅ Analysis complete! ({success_count}/4 components successful)")
+            else:
+                st.warning(f"⚠️ Partial analysis complete ({success_count}/4 components successful)")
+            
+            # Display comprehensive results
+            display_comprehensive_insights(
+                results['grok_analysis'],
+                results['azure_insights'],
+                results['video_info'],
+                results['transcript_method']
+            )
+
+        except Exception as e:
+            progress_container.empty()
+            st.error(f"❌ Analysis failed: {str(e)}")
+
+if __name__ == "__main__":
+    main()
