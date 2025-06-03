@@ -267,40 +267,60 @@ with col2:
 youtube_url = st.text_input("YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...")
 if st.button("Analyze Video"):
     if not youtube_url:
-        st.error("Please enter a valid YouTube URL.")
-    elif not (openai_status and azure_status):
-        st.error("Cannot proceed: One or both APIs are not working. Check the status above.")
-    else:
-        # Create a temporary directory for video download
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            # Step 1: Get Grok Summary
-            with st.spinner("Fetching transcript and generating summary..."):
-                video_id = extract_video_id(youtube_url)
-                if video_id:
-                    transcript = get_youtube_transcript(video_id)
-                    if transcript:
-                        insights = get_grok_insights(transcript)
-                        if insights:
-                            st.header("Grok Summary & Insights")
-                            st.markdown(insights)
-                        else:
-                            st.warning("Could not generate Grok insights.")
-                    else:
-                        st.warning("No transcript available for this video.")
+        st.error("Please enter a valid YouTube URL Cummulative distribution function (CDF) of the video duration in minutes is given by:
+    F(t) = 1 - e^(-0.1t), t ≥ 0
+Find the probability that the duration of a randomly selected video is between 5 and 10 minutes.
 
-            # Step 2: Download and process with Azure
-            with st.spinner("Downloading and analyzing video with Azure..."):
-                video_path = download_youtube_video(youtube_url, tmpdirname)
-                if video_path:
-                    video_id = upload_video(video_path, "YouTube_Video")
-                    if video_id and wait_for_indexing(video_id):
-                        azure_insights = get_insights(video_id)
-                        if azure_insights:
-                            st.header("Azure Video Indexer Insights")
-                            display_azure_insights(azure_insights)
-                        else:
-                            st.warning("Could not fetch Azure insights.")
-                    else:
-                        st.error("Failed to process video with Azure.")
-                else:
-                    st.error("Failed to download video.")
+To find the probability that the duration of a randomly selected video is between 5 and 10 minutes using the given cumulative distribution function (CDF), \( F(t) = 1 - e^{-0.1t} \) for \( t \geq 0 \), we proceed as follows:
+
+The CDF \( F(t) \) gives the probability that the video duration \( T \) is less than or equal to \( t \), i.e., \( F(t) = P(T \leq t) \). To find the probability that the duration is between 5 and 10 minutes, \( P(5 < T < 10) \), we use the property of the CDF:
+
+\[
+P(a < T < b) = F(b) - F(a)
+\]
+
+Here, \( a = 5 \) and \( b = 10 \). So, we need to compute:
+
+\[
+P(5 < T < 10) = F(10) - F(5)
+\]
+
+### Step 1: Compute \( F(10) \)
+Substitute \( t = 10 \) into the CDF:
+
+\[
+F(10) = 1 - e^{-0.1 \cdot 10} = 1 - e^{-1}
+\]
+
+Using the value of \( e^{-1} \approx 0.367879 \):
+
+\[
+F(10) = 1 - 0.367879 = 0.632121
+\]
+
+### Step 2: Compute \( F(5) \)
+Substitute \( t = 5 \) into the CDF:
+
+\[
+F(5) = 1 - e^{-0.1 \cdot 5} = 1 - e^{-0.5}
+\]
+
+Using the value of \( e^{-0.5} \approx 0.606531 \):
+
+\[
+F(5) = 1 - 0.606531 = 0.393469
+\]
+
+### Step 3: Compute the Probability
+Now, subtract \( F(5) \) from \( F(10) \):
+
+\[
+P(5 < T < 10) = F(10) - F(5) = 0.632121 - 0.393469 = 0.238652
+\]
+
+### Final Answer
+The probability that the duration of a randomly selected video is between 5 and 10 minutes is approximately:
+
+\[
+\boxed{0.239}
+\]
