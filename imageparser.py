@@ -9,13 +9,13 @@ import io
 # Load environment variables
 load_dotenv()
 
-# Get API key from environment (works for both local .env and Streamlit Cloud secrets)
+# Get API key from environment
 API_KEY = os.getenv("XAI_API_KEY")
 
 # API endpoint
 API_URL = "https://api.x.ai/v1/chat/completions"
 
-# Vastu prompt template
+# Vastu prompt templates
 VASTU_PROMPT = """
 You are a Vastu Shastra expert. Provide engaging and concise Vastu insights for a building layout facing the {direction} direction. 
 Include:
@@ -62,6 +62,9 @@ def encode_image_to_base64(image_file):
 
 def get_vastu_insights(direction, image_base64=None):
     """Get Vastu insights with or without image analysis"""
+    if not API_KEY:
+        return "Error: API key not found. Please set XAI_API_KEY in your environment."
+    
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {API_KEY}"
@@ -69,7 +72,8 @@ def get_vastu_insights(direction, image_base64=None):
     
     # Choose appropriate model and prompt based on whether image is provided
     if image_base64:
-        model = "grok-vision-beta"
+        # Use Grok 3 for vision tasks (supports images)
+        model = "grok-3"
         messages = [
             {
                 "role": "system",
@@ -92,7 +96,8 @@ def get_vastu_insights(direction, image_base64=None):
             }
         ]
     else:
-        model = "grok-beta"  # Use regular model for text-only
+        # Use Grok 3 Mini for text-only (more cost-effective)
+        model = "grok-3-mini"
         messages = [
             {
                 "role": "system",
@@ -126,15 +131,18 @@ def get_vastu_insights(direction, image_base64=None):
 st.set_page_config(
     page_title="Vastu Insights", 
     page_icon="🏡", 
-    layout="centered",
-    initial_sidebar_state="collapsed"
+    layout="centered"
 )
 
 # Main app interface
 st.title("🏡 Vastu Insights for Your Home")
 st.markdown("Upload your floor plan and select the facing direction to get personalized Vastu analysis!")
 
-# Create two columns for better layout
+# Debug info (remove this in production)
+st.write("Debug: Streamlit version:", st.__version__)
+st.write("Debug: API Key available:", "Yes" if API_KEY else "No")
+
+# Create layout
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -146,91 +154,71 @@ with col1:
     )
 
 with col2:
-    # Image upload
+    # Image upload - simplified
     uploaded_image = st.file_uploader(
         "📋 Upload floor plan:",
         type=["png", "jpg", "jpeg"],
         help="Upload your home layout for detailed analysis"
     )
 
-# Display uploaded image and get insights
+# Show current selections
+st.write(f"Selected direction: **{direction}**")
+st.write(f"Image uploaded: **{'Yes' if uploaded_image else 'No'}**")
+
+# Display uploaded image and analysis
 if uploaded_image is not None:
     st.image(uploaded_image, caption="Your Floor Plan", use_column_width=True)
     
     # Analysis button
-    if st.button("🔮 Get Vastu Analysis", type="primary", use_container_width=True):
-        if not API_KEY:
-            st.error("⚠️ API key not found. Please set XAI_API_KEY in your environment.")
-        else:
-            with st.spinner("Analyzing your floor plan with Vastu principles..."):
-                # Process the image
-                image_base64 = encode_image_to_base64(uploaded_image)
+    if st.button("🔮 Get Vastu Analysis", type="primary"):
+        with st.spinner("Analyzing your floor plan with Vastu principles..."):
+            # Process the image
+            image_base64 = encode_image_to_base64(uploaded_image)
+            
+            if image_base64:
+                # Get insights with image
+                insights = get_vastu_insights(direction, image_base64)
                 
-                if image_base64:
-                    # Get insights with image
-                    insights = get_vastu_insights(direction, image_base64)
-                    
-                    # Display results
-                    st.success("✨ Analysis Complete!")
-                    st.subheader(f"Vastu Analysis for {direction}-Facing Home")
-                    
-                    # Create expandable sections for better readability
-                    with st.expander("📊 Detailed Vastu Analysis", expanded=True):
-                        st.markdown(insights)
-                else:
-                    st.error("Failed to process image. Please try uploading again.")
+                # Display results
+                st.success("✨ Analysis Complete!")
+                st.subheader(f"Vastu Analysis for {direction}-Facing Home")
+                st.markdown(insights)
+            else:
+                st.error("Failed to process image. Please try uploading again.")
 else:
     # Show placeholder when no image is uploaded
-    st.info("👆 Please upload your floor plan image and select the facing direction to get started.")
+    st.info("👆 Please upload your floor plan image above to get started.")
     
     # Option to get general advice without image
-    if st.button("Get General Vastu Tips", type="secondary"):
-        if not API_KEY:
-            st.error("⚠️ API key not found. Please set XAI_API_KEY in your environment.")
-        else:
-            with st.spinner("Getting Vastu insights..."):
-                insights = get_vastu_insights(direction)
-                st.subheader(f"General Vastu Tips for {direction}-Facing Home")
-                st.markdown(insights)
+    if st.button("Get General Vastu Tips"):
+        with st.spinner("Getting Vastu insights..."):
+            insights = get_vastu_insights(direction)
+            st.subheader(f"General Vastu Tips for {direction}-Facing Home")
+            st.markdown(insights)
 
 # Additional information
 st.markdown("---")
 st.markdown("### 📝 Tips for better results:")
 st.markdown("""
 - Ensure your floor plan image is clear and readable
-- Include room labels if possible
+- Include room labels if possible  
 - Make sure the image shows the complete layout
 - Specify the correct facing direction of your main entrance
 """)
 
-# Styling for engagement
+# Basic styling
 st.markdown("""
 <style>
-    .stButton>button {
+    .stButton > button {
         background-color: #4CAF50;
         color: white;
         border-radius: 10px;
+        border: none;
         padding: 10px 20px;
         font-weight: bold;
     }
-    .stButton>button:hover {
+    .stButton > button:hover {
         background-color: #45a049;
-    }
-    .stSelectbox {
-        background-color: #f0f2f6;
-        border-radius: 10px;
-        padding: 10px;
-    }
-    .stFileUploader {
-        background-color: #f0f2f6;
-        border-radius: 10px;
-        padding: 10px;
-    }
-    .stSuccess {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        border-radius: 10px;
-        padding: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
