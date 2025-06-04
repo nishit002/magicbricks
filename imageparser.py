@@ -72,8 +72,8 @@ def get_vastu_insights(direction, image_base64=None):
     
     # Choose appropriate model and prompt based on whether image is provided
     if image_base64:
-        # Use Grok 2 Vision for image analysis
-        model = "grok-2-vision-012"
+        # Use grok-beta model (supports both text and images)
+        model = "grok-beta"
         messages = [
             {
                 "role": "system",
@@ -96,8 +96,8 @@ def get_vastu_insights(direction, image_base64=None):
             }
         ]
     else:
-        # Use Grok 2 for text-only tasks
-        model = "grok-2-012"
+        # Use grok-beta model for text-only tasks
+        model = "grok-beta"
         messages = [
             {
                 "role": "system",
