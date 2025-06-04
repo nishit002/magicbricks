@@ -5,10 +5,10 @@ from PIL import Image
 import io
 import openai
 
-# === Set API key from secrets ===
+# === Load OpenAI API key from Streamlit secrets ===
 openai.api_key = st.secrets["openai"]["api_key"]
 
-# === Prompt templates ===
+# === Vastu prompt templates ===
 VASTU_PROMPT = """
 You are a Vastu Shastra expert. Provide engaging and concise Vastu insights for a building layout facing the {direction} direction. 
 Include:
@@ -30,7 +30,7 @@ Provide specific insights based on the layout you can see:
 Format the response in a friendly, conversational tone, and keep it under 400 words.
 """
 
-# === Utility function to encode uploaded image ===
+# === Encode uploaded image ===
 def encode_image_to_base64(image_file):
     image = Image.open(image_file)
     if image.mode != "RGB":
@@ -39,7 +39,7 @@ def encode_image_to_base64(image_file):
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-# === Vastu analysis using OpenAI ===
+# === Generate Vastu insights ===
 def get_vastu_insights(direction, image_base64=None):
     try:
         if image_base64:
@@ -51,7 +51,7 @@ def get_vastu_insights(direction, image_base64=None):
             content = VASTU_PROMPT.format(direction=direction)
 
         response = openai.chat.completions.create(
-            model="gpt-4-vision-preview" if image_base64 else "gpt-4",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": "You are a Vastu Shastra expert."},
                 {"role": "user", "content": content}
@@ -61,14 +61,14 @@ def get_vastu_insights(direction, image_base64=None):
         return response.choices[0].message.content
 
     except Exception as e:
-        return f"Error fetching insights: {str(e)}"
+        return f"❌ Error fetching insights: {str(e)}"
 
-# === Streamlit Page Setup ===
+# === Streamlit UI ===
 st.set_page_config(page_title="Vastu Insights", page_icon="🏡", layout="centered")
 st.title("🏡 Vastu Insights for Your Home")
 st.markdown("Upload your floor plan and select the facing direction to get personalized Vastu analysis!")
 
-# === UI ===
+# === Inputs ===
 col1, col2 = st.columns([1, 1])
 with col1:
     direction = st.selectbox(
@@ -83,22 +83,22 @@ with col2:
         help="Upload your home layout for detailed analysis"
     )
 
-# === Trigger Analysis ===
+# === Output ===
 if uploaded_image:
     st.image(uploaded_image, caption="Your Floor Plan", use_container_width=True)
     if st.button("🔮 Get Vastu Analysis"):
-        with st.spinner("Analyzing with Vastu principles..."):
+        with st.spinner("Analyzing your layout with Vastu principles..."):
             image_base64 = encode_image_to_base64(uploaded_image)
-            response = get_vastu_insights(direction, image_base64)
+            insights = get_vastu_insights(direction, image_base64)
             st.success("✨ Analysis Complete!")
             st.subheader(f"Vastu Analysis for {direction}-Facing Home")
-            st.markdown(response)
+            st.markdown(insights)
 else:
     if st.button("Get General Vastu Tips"):
-        with st.spinner("Getting Vastu insights..."):
-            response = get_vastu_insights(direction)
+        with st.spinner("Fetching insights..."):
+            insights = get_vastu_insights(direction)
             st.subheader(f"General Vastu Tips for {direction}-Facing Home")
-            st.markdown(response)
+            st.markdown(insights)
 
 # === Tips Section ===
 st.markdown("---")
@@ -110,7 +110,7 @@ st.markdown("""
 - Specify the correct facing direction of your main entrance
 """)
 
-# === Button Style ===
+# === Styling ===
 st.markdown("""
 <style>
     .stButton > button {
