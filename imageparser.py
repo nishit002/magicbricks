@@ -72,8 +72,8 @@ def get_vastu_insights(direction, image_base64=None):
     
     # Choose appropriate model and prompt based on whether image is provided
     if image_base64:
-        # Use Grok 3 for vision tasks (supports images)
-        model = "grok-3"
+        # Use Grok 2 Vision for image analysis
+        model = "grok-2-vision-012"
         messages = [
             {
                 "role": "system",
@@ -96,8 +96,8 @@ def get_vastu_insights(direction, image_base64=None):
             }
         ]
     else:
-        # Use Grok 3 Mini for text-only (more cost-effective)
-        model = "grok-3-mini"
+        # Use Grok 2 for text-only tasks
+        model = "grok-2-012"
         messages = [
             {
                 "role": "system",
@@ -114,7 +114,7 @@ def get_vastu_insights(direction, image_base64=None):
         "model": model,
         "stream": False,
         "temperature": 0.7,
-        "max_tokens": 1000
+        "max_tokens": 2000
     }
     
     try:
@@ -167,7 +167,7 @@ st.write(f"Image uploaded: **{'Yes' if uploaded_image else 'No'}**")
 
 # Display uploaded image and analysis
 if uploaded_image is not None:
-    st.image(uploaded_image, caption="Your Floor Plan", use_column_width=True)
+    st.image(uploaded_image, caption="Your Floor Plan", use_container_width=True)
     
     # Analysis button
     if st.button("🔮 Get Vastu Analysis", type="primary"):
