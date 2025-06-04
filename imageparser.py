@@ -3,18 +3,12 @@ import requests
 import base64
 from PIL import Image
 import io
+import openai
 
-# === Load API key from Streamlit secrets ===
-XAI_API_KEY = st.secrets.get("XAI_API_KEY")
+# === Set API key from secrets ===
+openai.api_key = st.secrets["openai"]["api_key"]
 
-if not XAI_API_KEY:
-    st.error("❌ API key missing. Please add `XAI_API_KEY` to Streamlit secrets.")
-    st.stop()
-
-# === API endpoint ===
-API_URL = "https://api.x.ai/v1/chat/completions"
-
-# === Vastu prompt templates ===
+# === Prompt templates ===
 VASTU_PROMPT = """
 You are a Vastu Shastra expert. Provide engaging and concise Vastu insights for a building layout facing the {direction} direction. 
 Include:
@@ -36,96 +30,52 @@ Provide specific insights based on the layout you can see:
 Format the response in a friendly, conversational tone, and keep it under 400 words.
 """
 
-# === Image encoding ===
+# === Utility function to encode uploaded image ===
 def encode_image_to_base64(image_file):
-    try:
-        image = Image.open(image_file)
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        buffer = io.BytesIO()
-        image.save(buffer, format='JPEG')
-        buffer.seek(0)
-        image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        return image_base64
-    except Exception as e:
-        st.error(f"Error processing image: {str(e)}")
-        return None
+    image = Image.open(image_file)
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-# === Vastu API call ===
+# === Vastu analysis using OpenAI ===
 def get_vastu_insights(direction, image_base64=None):
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {XAI_API_KEY}"
-    }
-
-    if image_base64:
-        model = "grok-3"
-        messages = [
-            {"role": "system", "content": "You are a Vastu Shastra expert analyzing floor plans and providing insights."},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": VASTU_PROMPT_WITH_IMAGE.format(direction=direction)
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
-                        }
-                    }
-                ]
-            }
-        ]
-    else:
-        model = "grok-3"
-        messages = [
-            {"role": "system", "content": "You are a Vastu Shastra expert providing insightful advice."},
-            {
-                "role": "user",
-                "content": VASTU_PROMPT.format(direction=direction)
-            }
-        ]
-
-    data = {
-        "model": model,
-        "messages": messages,
-        "stream": False,
-        "temperature": 0.7,
-        "max_tokens": 1000
-    }
-
     try:
-        response = requests.post(API_URL, headers=headers, json=data)
-        response.raise_for_status()
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
-    except requests.exceptions.HTTPError as e:
-        try:
-            error_message = response.json().get("error", {}).get("message", str(e))
-        except:
-            error_message = str(e)
-        return f"Error fetching insights: {error_message}"
+        if image_base64:
+            content = [
+                {"type": "text", "text": VASTU_PROMPT_WITH_IMAGE.format(direction=direction)},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+            ]
+        else:
+            content = VASTU_PROMPT.format(direction=direction)
+
+        response = openai.chat.completions.create(
+            model="gpt-4-vision-preview" if image_base64 else "gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a Vastu Shastra expert."},
+                {"role": "user", "content": content}
+            ],
+            max_tokens=1000
+        )
+        return response.choices[0].message.content
+
     except Exception as e:
-        return f"Unexpected error: {str(e)}"
+        return f"Error fetching insights: {str(e)}"
 
-# === Streamlit Page Config ===
+# === Streamlit Page Setup ===
 st.set_page_config(page_title="Vastu Insights", page_icon="🏡", layout="centered")
-
-# === UI ===
 st.title("🏡 Vastu Insights for Your Home")
 st.markdown("Upload your floor plan and select the facing direction to get personalized Vastu analysis!")
 
+# === UI ===
 col1, col2 = st.columns([1, 1])
-
 with col1:
     direction = st.selectbox(
         "🧭 Select facing direction:",
         ["North", "East", "South", "West", "Northeast", "Northwest", "Southeast", "Southwest"],
         help="Choose the direction your main entrance faces"
     )
-
 with col2:
     uploaded_image = st.file_uploader(
         "📋 Upload floor plan:",
@@ -133,34 +83,24 @@ with col2:
         help="Upload your home layout for detailed analysis"
     )
 
-st.write(f"Selected direction: **{direction}**")
-st.write(f"Image uploaded: **{'Yes' if uploaded_image else 'No'}**")
-
-# === Result Section ===
-if uploaded_image is not None:
+# === Trigger Analysis ===
+if uploaded_image:
     st.image(uploaded_image, caption="Your Floor Plan", use_container_width=True)
-
-    if st.button("🔮 Get Vastu Analysis", type="primary"):
-        with st.spinner("Analyzing your floor plan with Vastu principles..."):
+    if st.button("🔮 Get Vastu Analysis"):
+        with st.spinner("Analyzing with Vastu principles..."):
             image_base64 = encode_image_to_base64(uploaded_image)
-            if image_base64:
-                insights = get_vastu_insights(direction, image_base64)
-                st.success("✨ Analysis Complete!")
-                if direction:
-                    st.subheader(f"Vastu Analysis for {direction}-Facing Home")
-                st.markdown(insights)
-            else:
-                st.error("Failed to process image. Please try uploading again.")
+            response = get_vastu_insights(direction, image_base64)
+            st.success("✨ Analysis Complete!")
+            st.subheader(f"Vastu Analysis for {direction}-Facing Home")
+            st.markdown(response)
 else:
-    st.info("👆 Please upload your floor plan image above to get started.")
     if st.button("Get General Vastu Tips"):
         with st.spinner("Getting Vastu insights..."):
-            insights = get_vastu_insights(direction)
-            if direction:
-                st.subheader(f"General Vastu Tips for {direction}-Facing Home")
-            st.markdown(insights)
+            response = get_vastu_insights(direction)
+            st.subheader(f"General Vastu Tips for {direction}-Facing Home")
+            st.markdown(response)
 
-# === Extra Info ===
+# === Tips Section ===
 st.markdown("---")
 st.markdown("### 📝 Tips for better results:")
 st.markdown("""
@@ -170,7 +110,7 @@ st.markdown("""
 - Specify the correct facing direction of your main entrance
 """)
 
-# === Styling ===
+# === Button Style ===
 st.markdown("""
 <style>
     .stButton > button {
