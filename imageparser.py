@@ -1,5 +1,5 @@
 import streamlit as st
-from openai import OpenAI
+import requests
 import os
 from dotenv import load_dotenv
 import base64
@@ -11,6 +11,9 @@ load_dotenv()
 
 # Get API key from environment
 XAI_API_KEY = os.getenv("XAI_API_KEY")
+
+# API endpoint
+API_URL = "https://api.x.ai/v1/chat/completions"I_API_KEY = os.getenv("XAI_API_KEY")
 
 # Initialize OpenAI client for xAI
 if XAI_API_KEY:
@@ -67,76 +70,95 @@ def encode_image_to_base64(image_file):
         return None
 
 def get_vastu_insights(direction, image_base64=None):
-    """Get Vastu insights with or without image analysis"""
+    """Get Vastu insights with or without image analysis using xAI Grok API"""
     if not XAI_API_KEY:
         return "Error: XAI_API_KEY not found. Please set it in your environment."
     
-    if not client:
-        return "Error: Failed to initialize OpenAI client."
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {XAI_API_KEY}"
+    }
     
-    try:
-        # Choose appropriate model and prompt based on whether image is provided
-        if image_base64:
-            # Use grok-beta model (supports both text and images)
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are a Vastu Shastra expert analyzing floor plans and providing insights."
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": VASTU_PROMPT_WITH_IMAGE.format(direction=direction)
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_base64}"
-                            }
+    # Choose appropriate model and prompt based on whether image is provided
+    if image_base64:
+        # Use grok-beta for image analysis
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a Vastu Shastra expert analyzing floor plans and providing insights."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": VASTU_PROMPT_WITH_IMAGE.format(direction=direction)
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_base64}"
                         }
-                    ]
-                }
-            ]
-        else:
-            # Use grok-beta model for text-only tasks
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are a Vastu Shastra expert providing insightful advice."
-                },
-                {
-                    "role": "user",
-                    "content": VASTU_PROMPT.format(direction=direction)
-                }
-            ]
-        
-        # Try different models in order of preference
-        models_to_try = ["grok-3", "grok-beta", "grok-2"]
-        
-        for model in models_to_try:
-            try:
-                completion = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0.7,
-                    max_tokens=2000
-                )
-                return completion.choices[0].message.content
-            except Exception as model_error:
-                # If it's a 404 for the model, try the next one
-                if "404" in str(model_error) or "not found" in str(model_error).lower():
-                    continue
-                else:
-                    # If it's a different error, return it
-                    return f"Error with model {model}: {str(model_error)}"
-        
-        # If all models failed
-        return "Error: All models failed. Please check your API key and try again."
-        
-    except Exception as e:
-        return f"Unexpected error: {str(e)}"
+                    }
+                ]
+            }
+        ]
+    else:
+        # Use grok-beta for text-only tasks
+        messages = [
+            {
+                "role": "system", 
+                "content": "You are a Vastu Shastra expert providing insightful advice."
+            },
+            {
+                "role": "user",
+                "content": VASTU_PROMPT.format(direction=direction)
+            }
+        ]
+    
+    # Try different models in order of preference
+    models_to_try = ["grok-3", "grok-beta", "grok-2"]
+    
+    for model in models_to_try:
+        try:
+            data = {
+                "messages": messages,
+                "model": model,
+                "stream": False,
+                "temperature": 0.7,
+                "max_tokens": 2000
+            }
+            
+            response = requests.post(API_URL, headers=headers, json=data)
+            
+            # Check for different types of errors
+            if response.status_code == 404:
+                # Model not found, try next model
+                continue
+            elif response.status_code == 401:
+                return "Error: Invalid API key. Please check your XAI_API_KEY."
+            elif response.status_code == 403:
+                return "Error: Access forbidden. Please check your API permissions."
+            elif response.status_code == 429:
+                return "Error: Rate limit exceeded. Please try again later."
+            
+            # Raise for other HTTP errors
+            response.raise_for_status()
+            
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+            
+        except requests.exceptions.RequestException as e:
+            if "404" in str(e):
+                # Try next model
+                continue
+            else:
+                return f"Error with model {model}: {str(e)}"
+        except Exception as e:
+            return f"Unexpected error with model {model}: {str(e)}"
+    
+    # If all models failed
+    return "Error: All Grok models failed. This might be a temporary issue with xAI servers. Please try again later."
 
 # Streamlit app configuration
 st.set_page_config(
@@ -149,12 +171,12 @@ st.set_page_config(
 st.title("🏡 Vastu Insights for Your Home")
 st.markdown("Upload your floor plan and select the facing direction to get personalized Vastu analysis!")
 
-# Debug info (remove this in production)
+# Debug info for xAI Grok API
 st.write("Debug: Streamlit version:", st.__version__)
-st.write("Debug: API Key available:", "Yes" if XAI_API_KEY else "No")
+st.write("Debug: XAI API Key available:", "Yes" if XAI_API_KEY else "No")
 if XAI_API_KEY:
     st.write("Debug: API Key starts with:", XAI_API_KEY[:10] + "..." if len(XAI_API_KEY) > 10 else XAI_API_KEY)
-st.write("Debug: OpenAI client initialized:", "Yes" if client else "No")
+st.write("Debug: Using xAI Grok API endpoint:", API_URL)
 
 # Create layout
 col1, col2 = st.columns([1, 1])
