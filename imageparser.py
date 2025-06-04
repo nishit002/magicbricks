@@ -1,5 +1,5 @@
 import streamlit as st
-import requests
+from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import base64
@@ -10,10 +10,16 @@ import io
 load_dotenv()
 
 # Get API key from environment
-API_KEY = os.getenv("XAI_API_KEY")
+XAI_API_KEY = os.getenv("XAI_API_KEY")
 
-# API endpoint
-API_URL = "https://api.x.ai/v1/chat/completions"
+# Initialize OpenAI client for xAI
+if XAI_API_KEY:
+    client = OpenAI(
+        api_key=XAI_API_KEY,
+        base_url="https://api.x.ai/v1"
+    )
+else:
+    client = None
 
 # Vastu prompt templates
 VASTU_PROMPT = """
@@ -62,68 +68,73 @@ def encode_image_to_base64(image_file):
 
 def get_vastu_insights(direction, image_base64=None):
     """Get Vastu insights with or without image analysis"""
-    if not API_KEY:
-        return "Error: API key not found. Please set XAI_API_KEY in your environment."
+    if not XAI_API_KEY:
+        return "Error: XAI_API_KEY not found. Please set it in your environment."
     
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {API_KEY}"
-    }
-    
-    # Choose appropriate model and prompt based on whether image is provided
-    if image_base64:
-        # Use grok-beta model (supports both text and images)
-        model = "grok-beta"
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a Vastu Shastra expert analyzing floor plans and providing insights."
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": VASTU_PROMPT_WITH_IMAGE.format(direction=direction)
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
-                        }
-                    }
-                ]
-            }
-        ]
-    else:
-        # Use grok-beta model for text-only tasks
-        model = "grok-beta"
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a Vastu Shastra expert providing insightful advice."
-            },
-            {
-                "role": "user",
-                "content": VASTU_PROMPT.format(direction=direction)
-            }
-        ]
-    
-    data = {
-        "messages": messages,
-        "model": model,
-        "stream": False,
-        "temperature": 0.7,
-        "max_tokens": 2000
-    }
+    if not client:
+        return "Error: Failed to initialize OpenAI client."
     
     try:
-        response = requests.post(API_URL, headers=headers, json=data)
-        response.raise_for_status()
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
-    except requests.exceptions.RequestException as e:
-        return f"Error fetching insights: {str(e)}"
+        # Choose appropriate model and prompt based on whether image is provided
+        if image_base64:
+            # Use grok-beta model (supports both text and images)
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a Vastu Shastra expert analyzing floor plans and providing insights."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": VASTU_PROMPT_WITH_IMAGE.format(direction=direction)
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}"
+                            }
+                        }
+                    ]
+                }
+            ]
+        else:
+            # Use grok-beta model for text-only tasks
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a Vastu Shastra expert providing insightful advice."
+                },
+                {
+                    "role": "user",
+                    "content": VASTU_PROMPT.format(direction=direction)
+                }
+            ]
+        
+        # Try different models in order of preference
+        models_to_try = ["grok-3", "grok-beta", "grok-2"]
+        
+        for model in models_to_try:
+            try:
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+                return completion.choices[0].message.content
+            except Exception as model_error:
+                # If it's a 404 for the model, try the next one
+                if "404" in str(model_error) or "not found" in str(model_error).lower():
+                    continue
+                else:
+                    # If it's a different error, return it
+                    return f"Error with model {model}: {str(model_error)}"
+        
+        # If all models failed
+        return "Error: All models failed. Please check your API key and try again."
+        
     except Exception as e:
         return f"Unexpected error: {str(e)}"
 
@@ -140,7 +151,10 @@ st.markdown("Upload your floor plan and select the facing direction to get perso
 
 # Debug info (remove this in production)
 st.write("Debug: Streamlit version:", st.__version__)
-st.write("Debug: API Key available:", "Yes" if API_KEY else "No")
+st.write("Debug: API Key available:", "Yes" if XAI_API_KEY else "No")
+if XAI_API_KEY:
+    st.write("Debug: API Key starts with:", XAI_API_KEY[:10] + "..." if len(XAI_API_KEY) > 10 else XAI_API_KEY)
+st.write("Debug: OpenAI client initialized:", "Yes" if client else "No")
 
 # Create layout
 col1, col2 = st.columns([1, 1])
