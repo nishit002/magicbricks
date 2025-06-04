@@ -1,16 +1,11 @@
 import streamlit as st
 import requests
-import os
-from dotenv import load_dotenv
 import base64
 from PIL import Image
 import io
 
-# Load environment variables
-load_dotenv()
-
-# Get API key from environment
-API_KEY = os.getenv("XAI_API_KEY")
+# API key (hardcoded for testing; use .env in production)
+XAI_API_KEY = "xai-jAEisoP6P018c58iDzp8yjBXJVwscN7NGw1QxgyTUvkA67AwTdG7L8OgXBE10Wuy9ha5DW3IUd1GJrXg"
 
 # API endpoint
 API_URL = "https://api.x.ai/v1/chat/completions"
@@ -54,12 +49,12 @@ def encode_image_to_base64(image_file):
 
 def get_vastu_insights(direction, image_base64=None):
     """Get Vastu insights with or without image analysis"""
-    if not API_KEY:
-        return "Error: API key not found. Please set XAI_API_KEY in your environment."
+    if not XAI_API_KEY:
+        return "Error: API key not found. Please set XAI_API_KEY."
     
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {API_KEY}"
+        "Authorization": f"Bearer {XAI_API_KEY}"
     }
     
     if image_base64:
@@ -86,7 +81,7 @@ def get_vastu_insights(direction, image_base64=None):
             }
         ]
     else:
-        model = "grok-3"  # Use same model for simplicity; verify from xAI API docs
+        model = "grok-3"  # Verify correct model name from xAI API docs
         messages = [
             {
                 "role": "system",
@@ -112,7 +107,10 @@ def get_vastu_insights(direction, image_base64=None):
         result = response.json()
         return result["choices"][0]["message"]["content"]
     except requests.exceptions.HTTPError as e:
-        error_message = response.json().get("error", {}).get("message", str(e))
+        try:
+            error_message = response.json().get("error", {}).get("message", str(e))
+        except:
+            error_message = str(e)
         return f"Error fetching insights: {error_message}"
     except Exception as e:
         return f"Unexpected error: {str(e)}"
