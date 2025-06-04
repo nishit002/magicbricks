@@ -4,13 +4,17 @@ import base64
 from PIL import Image
 import io
 
-# API key (hardcoded for testing; use .env in production)
-XAI_API_KEY = "xai-jAEisoP6P018c58iDzp8yjBXJVwscN7NGw1QxgyTUvkA67AwTdG7L8OgXBE10Wuy9ha5DW3IUd1GJrXg"
+# === Load API key from Streamlit secrets ===
+XAI_API_KEY = st.secrets.get("XAI_API_KEY")
 
-# API endpoint
+if not XAI_API_KEY:
+    st.error("❌ API key missing. Please add `XAI_API_KEY` to Streamlit secrets.")
+    st.stop()
+
+# === API endpoint ===
 API_URL = "https://api.x.ai/v1/chat/completions"
 
-# Vastu prompt templates
+# === Vastu prompt templates ===
 VASTU_PROMPT = """
 You are a Vastu Shastra expert. Provide engaging and concise Vastu insights for a building layout facing the {direction} direction. 
 Include:
@@ -32,8 +36,8 @@ Provide specific insights based on the layout you can see:
 Format the response in a friendly, conversational tone, and keep it under 400 words.
 """
 
+# === Image encoding ===
 def encode_image_to_base64(image_file):
-    """Convert uploaded image to base64 string"""
     try:
         image = Image.open(image_file)
         if image.mode != 'RGB':
@@ -47,23 +51,17 @@ def encode_image_to_base64(image_file):
         st.error(f"Error processing image: {str(e)}")
         return None
 
+# === Vastu API call ===
 def get_vastu_insights(direction, image_base64=None):
-    """Get Vastu insights with or without image analysis"""
-    if not XAI_API_KEY:
-        return "Error: API key not found. Please set XAI_API_KEY."
-    
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {XAI_API_KEY}"
     }
-    
+
     if image_base64:
-        model = "grok-3"  # Verify correct model name from xAI API docs
+        model = "grok-3"
         messages = [
-            {
-                "role": "system",
-                "content": "You are a Vastu Shastra expert analyzing floor plans and providing insights."
-            },
+            {"role": "system", "content": "You are a Vastu Shastra expert analyzing floor plans and providing insights."},
             {
                 "role": "user",
                 "content": [
@@ -81,18 +79,15 @@ def get_vastu_insights(direction, image_base64=None):
             }
         ]
     else:
-        model = "grok-3"  # Verify correct model name from xAI API docs
+        model = "grok-3"
         messages = [
-            {
-                "role": "system",
-                "content": "You are a Vastu Shastra expert providing insightful advice."
-            },
+            {"role": "system", "content": "You are a Vastu Shastra expert providing insightful advice."},
             {
                 "role": "user",
                 "content": VASTU_PROMPT.format(direction=direction)
             }
         ]
-    
+
     data = {
         "model": model,
         "messages": messages,
@@ -100,7 +95,7 @@ def get_vastu_insights(direction, image_base64=None):
         "temperature": 0.7,
         "max_tokens": 1000
     }
-    
+
     try:
         response = requests.post(API_URL, headers=headers, json=data)
         response.raise_for_status()
@@ -115,14 +110,13 @@ def get_vastu_insights(direction, image_base64=None):
     except Exception as e:
         return f"Unexpected error: {str(e)}"
 
-# Streamlit app configuration
+# === Streamlit Page Config ===
 st.set_page_config(page_title="Vastu Insights", page_icon="🏡", layout="centered")
 
-# Main app interface
+# === UI ===
 st.title("🏡 Vastu Insights for Your Home")
 st.markdown("Upload your floor plan and select the facing direction to get personalized Vastu analysis!")
 
-# Create layout
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -139,21 +133,21 @@ with col2:
         help="Upload your home layout for detailed analysis"
     )
 
-# Show current selections
 st.write(f"Selected direction: **{direction}**")
 st.write(f"Image uploaded: **{'Yes' if uploaded_image else 'No'}**")
 
-# Display uploaded image and analysis
+# === Result Section ===
 if uploaded_image is not None:
     st.image(uploaded_image, caption="Your Floor Plan", use_container_width=True)
-    
+
     if st.button("🔮 Get Vastu Analysis", type="primary"):
         with st.spinner("Analyzing your floor plan with Vastu principles..."):
             image_base64 = encode_image_to_base64(uploaded_image)
             if image_base64:
                 insights = get_vastu_insights(direction, image_base64)
                 st.success("✨ Analysis Complete!")
-                st.subheader(f"Vastu Analysis for {direction}-Facing Home")
+                if direction:
+                    st.subheader(f"Vastu Analysis for {direction}-Facing Home")
                 st.markdown(insights)
             else:
                 st.error("Failed to process image. Please try uploading again.")
@@ -162,20 +156,21 @@ else:
     if st.button("Get General Vastu Tips"):
         with st.spinner("Getting Vastu insights..."):
             insights = get_vastu_insights(direction)
-            st.subheader(f"General Vastu Tips for {direction}-Facing Home")
+            if direction:
+                st.subheader(f"General Vastu Tips for {direction}-Facing Home")
             st.markdown(insights)
 
-# Additional information
+# === Extra Info ===
 st.markdown("---")
 st.markdown("### 📝 Tips for better results:")
 st.markdown("""
-- Ensure your floor plan image is clear and readable
+- Ensure your floor plan image is clear and readable  
 - Include room labels if possible  
-- Make sure the image shows the complete layout
+- Make sure the image shows the complete layout  
 - Specify the correct facing direction of your main entrance
 """)
 
-# Basic styling
+# === Styling ===
 st.markdown("""
 <style>
     .stButton > button {
