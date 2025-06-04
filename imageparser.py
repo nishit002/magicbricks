@@ -1,13 +1,12 @@
 import streamlit as st
 import requests
-import json
 import os
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Get API key from environment
+# Get API key from environment (works for both local .env and Streamlit Cloud secrets)
 API_KEY = os.getenv("XAI_API_KEY")
 
 # API endpoint
@@ -51,14 +50,14 @@ def get_vastu_insights(direction):
         response.raise_for_status()
         result = response.json()
         return result["choices"][0]["message"]["content"]
-    except requests.exceptions.RequestException as e:
+    except requests.exceptions.RequestException pase:
         return f"Error fetching insights: {str(e)}"
 
 # Streamlit app
 st.set_page_config(page_title="Vastu Insights", page_icon="🏡", layout="centered")
 
 st.title("🏡 Vastu Insights for Your Home")
-st.markdown("Discover Vastu Shastra tips for your home based on its facing direction! Select a direction below to get personalized insights.")
+st.markdown("Discover Vastu Shastra tips for your home based on its facing direction! Select a direction below and optionally upload a layout image to get personalized insights.")
 
 # Direction selection
 direction = st.selectbox(
@@ -66,12 +65,22 @@ direction = st.selectbox(
     ["North", "East", "South", "West", "Northeast", "Northwest", "Southeast", "Southwest"]
 )
 
+# Image upload
+uploaded_image = st.file_uploader("Upload your home layout image (optional):", type=["png", "jpg", "jpeg"])
+
+# Display uploaded image if provided
+if uploaded_image is not None:
+    st.image(uploaded_image, caption="Uploaded Home Layout", use_column_width=True)
+
 # Get and display insights
 if st.button("Get Vastu Insights"):
-    with st.spinner("Fetching Vastu wisdom..."):
-        insights = get_vastu_insights(direction)
-        st.subheader(f"Vastu Insights for {direction}-Facing Home")
-        st.markdown(insights, unsafe_allow_html=True)
+    if not API_KEY:
+        st.error("API key not found. Please ensure the XAI_API_KEY is set in secrets.toml or .env file.")
+    else:
+        with st.spinner("Fetching Vastu wisdom..."):
+            insights = get_vastu_insights(direction)
+            st.subheader(f"Vastu Insights for {direction}-Facing Home")
+            st.markdown(insights, unsafe_allow_html=True)
         
 # Styling for engagement
 st.markdown("""
@@ -83,6 +92,11 @@ st.markdown("""
         padding: 10px 20px;
     }
     .stSelectbox {
+        background-color: #f0f2f6;
+        border-radius: 10px;
+        padding: 10px;
+    }
+    .stFileUploader {
         background-color: #f0f2f6;
         border-radius: 10px;
         padding: 10px;
