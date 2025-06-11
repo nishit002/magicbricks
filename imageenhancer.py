@@ -20,15 +20,20 @@ if uploaded_file and title_text:
     txt_layer = Image.new("RGBA", image.size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(txt_layer)
 
-    # Load a font (fallback to default if no font file is found)
+    # Load font
     try:
         font = ImageFont.truetype("arial.ttf", size=int(image.size[1] * 0.07))
     except:
         font = ImageFont.load_default()
 
-    # Calculate text size and position
-    text_width, text_height = draw.textsize(title_text, font=font)
-    position = ((image.width - text_width) // 2, 20)  # top-center
+    # Calculate text size
+    try:
+        bbox = font.getbbox(title_text)
+        text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    except AttributeError:
+        text_width, text_height = font.getsize(title_text)
+
+    position = ((image.width - text_width) // 2, 20)  # top center
 
     # Draw the text
     draw.text(position, title_text, font=font, fill=(255, 255, 255, 255))
@@ -44,5 +49,5 @@ if uploaded_file and title_text:
     # Offer download
     img_bytes = io.BytesIO()
     final_image.save(img_bytes, format='JPEG')
-    st.download_button(label="📥 Download Enhanced Image", data=img_bytes.getvalue(),
+    st.download_button("📥 Download Enhanced Image", data=img_bytes.getvalue(),
                        file_name="enhanced_image.jpg", mime="image/jpeg")
