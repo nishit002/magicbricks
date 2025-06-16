@@ -1,4 +1,3 @@
-# main.py
 import streamlit as st
 import pandas as pd
 import requests
@@ -31,10 +30,10 @@ def fetch_keywords_for_url(url):
     result = response.json()
     try:
         return result["tasks"][0]["result"][0]["items"]
-    except:
+    except (KeyError, IndexError):
         return []
 
-# Step 2: Get keyword ideas from DataForSEO for each keyword
+# Step 2: Get keyword expansions from DataForSEO for each keyword
 def get_keyword_expansions(keywords):
     endpoint = "https://api.dataforseo.com/v3/keywords_data/google_ads/keywords_for_keywords/live"
     expanded = []
@@ -49,7 +48,7 @@ def get_keyword_expansions(keywords):
             try:
                 items = resp.json()["tasks"][0]["result"][0]["items"]
                 expanded.extend(items)
-            except:
+            except (KeyError, IndexError):
                 continue
     return expanded
 
@@ -70,8 +69,9 @@ Respond in JSON format with keys: article_worthy, title, intent, related_topics
     )
     if response.status_code == 200:
         try:
-            return json.loads(response.json()["text"].strip())
-        except:
+            data = response.json()
+            return json.loads(data["choices"][0]["text"].strip()) if "choices" in data else {"article_worthy": "No", "title": "", "intent": "", "related_topics": []}
+        except (KeyError, json.JSONDecodeError):
             return {"article_worthy": "No", "title": "", "intent": "", "related_topics": []}
     return {"article_worthy": "No", "title": "", "intent": "", "related_topics": []}
 
@@ -91,7 +91,7 @@ if url_input and st.button("Discover Topics"):
     with st.spinner("💡 Expanding to find new keyword opportunities..."):
         expanded = get_keyword_expansions(base_keywords)
 
-    candidates = [k for k in expanded if k.get("search_volume", 0) > 100 and not any(b in k["keyword"] for b in ["magicbricks", "login"])]
+    candidates = [k for k in expanded if k.get("search_volume", 0) > 100 and not any(b in k["keyword"].lower() for b in ["magicbricks", "login"])]
     df_all = pd.DataFrame(candidates)[["keyword", "search_volume", "competition"]].rename(columns={
         "keyword": "Keyword", "search_volume": "Search Volume", "competition": "Competition"
     })
