@@ -1,160 +1,78 @@
-import streamlit as st
-import pandas as pd
-import requests
-from requests.auth import HTTPBasicAuth
-import json
-import os
+from dataforseo_client import DataForSeoClient
+import asyncio
+import platform
 
-st.set_page_config(layout="wide")
-st.title("🧠 AI Content Gap Finder for Real Estate")
-st.write("Enter a Magicbricks URL or use uploaded keyword list to discover content opportunities.")
+# Initialize DataForSEO Client with your API credentials
+client = DataForSeoClient('your_username', 'your_password')
 
-# Load secrets
-DFS_LOGIN = st.secrets["dataforseo"]["login"]
-DFS_PASSWORD = st.secrets["dataforseo"]["password"]
-GROK_API_KEY = st.secrets["grok"]["api_key"]
-SCRAPER_API_KEY = st.secrets["scraper"]["api_key"]
+# Magicbricks domain and competitor domains
+magicbricks_domain = "magicbricks.com"
+competitors = ["99acres.com", "housing.com"]
 
-# Load keywords from Excel file
-def load_keywords_from_excel():
-    try:
-        df = pd.read_excel("keyword with url.xlsx")
-        return df[["Keyword", "URL"]].dropna().to_dict(orient="records")
-    except FileNotFoundError:
-        st.error("keyword with url.xlsx not found in the directory.")
-        return []
-    except Exception as e:
-        st.error(f"Error loading Excel file: {str(e)}")
-        return []
+async def fetch_existing_topics():
+    # Placeholder for scraping Magicbricks blog (replace with actual scraper logic)
+    # For now, simulate with a sample list based on the MahaRERA article
+    return ["maharera 2025", "maharera registration", "maharera complaints"]
 
-# Step 1: Fetch keywords using DataForSEO or Scraper API
-def fetch_keywords_for_url(url):
-    # Try DataForSEO first
-    endpoint = "https://api.dataforseo.com/v3/keywords_data/google_ads/keywords_for_url/live"
-    payload = [{"target": url, "language_code": "en", "location_code": 2356}]
-    response = requests.post(endpoint, auth=HTTPBasicAuth(DFS_LOGIN, DFS_PASSWORD), json=payload)
+async def get_keyword_gaps():
+    task_post_data = []
+    for competitor in competitors:
+        task_post_data.append({
+            "target1": magicbricks_domain,
+            "target2": competitor,
+            "language_code": "en",
+            "location_code": 2840,  # United States as default, adjust to India (e.g., 299)
+            "intersections": "false",
+            "limit": 1000
+        })
 
-    st.write("DataForSEO API Status Code:", response.status_code)
-    st.write("DataForSEO API Response:", response.text)
+    # Send request to DataForSeo Domain Intersection API
+    response = await client.labs.domain_intersection.post(task_post_data)
+    keyword_gaps = []
 
-    if response.status_code == 200:
-        result = response.json()
-        st.write("Raw DataForSEO Result:", result)
-        try:
-            return result["tasks"][0]["result"][0]["items"]
-        except (KeyError, IndexError):
-            st.error("Error parsing DataForSEO response.")
-            return []
-    elif response.status_code == 404:  # Fallback to Scraper API
-        st.warning("DataForSEO failed with 404. Trying Scraper API...")
-        scraper_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={url}&render=true"
-        scraper_response = requests.get(scraper_url)
-        st.write("Scraper API Status Code:", scraper_response.status_code)
-        st.write("Scraper API Response:", scraper_response.text)
+    if response and 'tasks' in response:
+        for task in response['tasks']:
+            if 'result' in task:
+                for result in task['result']:
+                    keyword = result.get('keyword', '').lower()
+                    search_volume = result.get('keyword_info', {}).get('search_volume', 0)
+                    if search_volume > 1000:  # Filter for significant search volume
+                        keyword_gaps.append(keyword)
 
-        if scraper_response.status_code == 200:
-            # Simple keyword extraction from HTML (basic approach)
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(scraper_response.text, "html.parser")
-            keywords = []
-            for meta in soup.find_all("meta"):
-                if "keywords" in meta.get("name", "").lower():
-                    keywords.extend(meta.get("content", "").split(","))
-            return [{"keyword": kw.strip(), "search_volume": 0} for kw in keywords if kw.strip()]
-        else:
-            st.error(f"Scraper API failed: {scraper_response.status_code}")
-            return []
+    return keyword_gaps
 
-    st.error(f"Failed to fetch keywords from Magicbricks URL: {response.status_code}")
-    return []
+async def generate_new_topics(existing_topics, keyword_gaps):
+    new_topics = []
+    existing_set = set(existing_topics)
+    
+    for gap in keyword_gaps:
+        if gap not in existing_set and any(word in gap for word in ["real estate", "property", "maharera", "housing"]):
+            # Refine gaps into article-friendly topics
+            topic = gap.replace("-", " ").title()
+            if "maharera" in gap:
+                topic = f"How to Navigate {topic} for Homebuyers"
+            elif "real estate" in gap:
+                topic = f"2025 {topic} Trends in India"
+            new_topics.append(topic)
 
-# Step 2: Get keyword expansions from DataForSEO for each keyword
-def get_keyword_expansions(keywords):
-    endpoint = "https://api.dataforseo.com/v3/keywords_data/google_ads/keywords_for_keywords/live"
-    payload = [{"keywords": [k], "language_code": "en", "location_code": 2356} for k in keywords]
-    response = requests.post(endpoint, auth=HTTPBasicAuth(DFS_LOGIN, DFS_PASSWORD), json=payload)
-    expanded = []
-    if response.status_code == 200:
-        try:
-            result = response.json()
-            for task in result.get("tasks", []):
-                items = task.get("result", [{}])[0].get("items", [])
-                expanded.extend(items)
-        except (KeyError, IndexError):
-            pass
-    return expanded
+    return new_topics[:10]  # Limit to top 10 ideas
 
-# Step 3: Ask Grok if keyword is article-worthy and get title
-def classify_with_grok(keyword):
-    prompt = f"""
-You are an SEO strategist. For the keyword: '{keyword}', determine:
-1. Is this keyword suitable for a blog/article? (Yes/No)
-2. If Yes, suggest an engaging title.
-3. Identify the intent (How-To, Listicle, FAQ, Explainer)
-4. Suggest 2 closely related content topics.
-Respond in JSON format with keys: article_worthy, title, intent, related_topics
-"""
-    response = requests.post(
-        "https://api.grok.xai.com/v1/completions",
-        headers={"Authorization": f"Bearer {GROK_API_KEY}"},
-        json={"prompt": prompt, "max_tokens": 300}
-    )
-    if response.status_code == 200:
-        try:
-            data = response.json()
-            return json.loads(data["choices"][0]["text"].strip()) if "choices" in data else {"article_worthy": "No", "title": "", "intent": "", "related_topics": []}
-        except (KeyError, json.JSONDecodeError):
-            return {"article_worthy": "No", "title": "", "intent": "", "related_topics": []}
-    return {"article_worthy": "No", "title": "", "intent": "", "related_topics": []}
+async def main():
+    # Fetch existing topics from Magicbricks
+    existing_topics = await fetch_existing_topics()
+    
+    # Get keyword gaps from DataForSEO
+    keyword_gaps = await get_keyword_gaps()
+    
+    # Generate new topics
+    new_topics = await generate_new_topics(existing_topics, keyword_gaps)
+    
+    # Output results
+    for topic in new_topics:
+        print(f"- {topic}")
 
-# UI section
-url_input = st.text_input("🔗 Enter a Magicbricks URL to analyze (optional):")
-keywords_data = load_keywords_from_excel()
-
-if st.button("Discover Topics"):
-    if url_input:
-        with st.spinner("🔍 Fetching keywords from Magicbricks page..."):
-            mb_keywords = fetch_keywords_for_url(url_input)
-        base_keywords = list(set([k["keyword"] for k in mb_keywords if k.get("search_volume", 0) > 0]))
-    elif keywords_data:
-        base_keywords = list(set([item["Keyword"] for item in keywords_data]))
-    else:
-        st.warning("No valid keywords found. Please provide a URL or ensure the Excel file is available.")
-        st.stop()
-
-    if not base_keywords:
-        st.warning("No valid keywords found for this URL or Excel data.")
-        st.stop()
-
-    with st.spinner("💡 Expanding to find new keyword opportunities..."):
-        expanded = get_keyword_expansions(base_keywords)
-
-    candidates = [k for k in expanded if k.get("search_volume", 0) > 100 and not any(b in k["keyword"].lower() for b in ["magicbricks", "login"])]
-    df_all = pd.DataFrame(candidates)[["keyword", "search_volume", "competition"]].rename(columns={
-        "keyword": "Keyword", "search_volume": "Search Volume", "competition": "Competition"
-    })
-    st.subheader("📊 Keyword Ideas Based on Input")
-    st.dataframe(df_all)
-
-    st.subheader("🤖 AI-Enhanced Article Ideas")
-    enriched = []
-    with st.spinner("Using AI to classify and suggest content topics..."):
-        for kw in df_all["Keyword"].head(50):
-            result = classify_with_grok(kw)
-            if result["article_worthy"].lower() == "yes":
-                enriched.append({
-                    "Keyword": kw,
-                    "Title Suggestion": result["title"],
-                    "Intent": result["intent"],
-                    "Related Topics": ", ".join(result["related_topics"])
-                })
-
-    df_final = pd.DataFrame(enriched)
-    st.dataframe(df_final)
-    st.download_button("⬇️ Download Suggestions", df_final.to_csv(index=False), "final_topics.csv")
-
-# Install required package if not present
-try:
-    import bs4
-except ImportError:
-    st.warning("Please install BeautifulSoup: `pip install beautifulsoup4`")
+if platform.system() == "Emscripten":
+    asyncio.ensure_future(main())
+else:
+    if __name__ == "__main__":
+        asyncio.run(main())
