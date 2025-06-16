@@ -16,11 +16,11 @@ GROK_API_KEY = st.secrets["grok"]["api_key"]
 # Step 1: Fetch keywords for provided Magicbricks page
 def fetch_keywords_for_url(url):
     endpoint = "https://api.dataforseo.com/v3/keywords_data/google_ads/keywords_for_url/live"
-    payload = {
+    payload = [{
         "target": url,
         "language_code": "en",
         "location_code": 2356  # India
-    }
+    }]
     response = requests.post(endpoint, auth=HTTPBasicAuth(DFS_LOGIN, DFS_PASSWORD), json=payload)
 
     st.write("API Status Code:", response.status_code)  # Debug status
@@ -43,20 +43,21 @@ def fetch_keywords_for_url(url):
 # Step 2: Get keyword expansions from DataForSEO for each keyword
 def get_keyword_expansions(keywords):
     endpoint = "https://api.dataforseo.com/v3/keywords_data/google_ads/keywords_for_keywords/live"
+    payload = [{
+        "keywords": [k],
+        "language_code": "en",
+        "location_code": 2356
+    } for k in keywords]
+    response = requests.post(endpoint, auth=HTTPBasicAuth(DFS_LOGIN, DFS_PASSWORD), json=payload)
     expanded = []
-    for k in keywords:
-        payload = {
-            "keywords": [k],
-            "language_code": "en",
-            "location_code": 2356
-        }
-        resp = requests.post(endpoint, auth=HTTPBasicAuth(DFS_LOGIN, DFS_PASSWORD), json=payload)
-        if resp.status_code == 200:
-            try:
-                items = resp.json()["tasks"][0]["result"][0]["items"]
+    if response.status_code == 200:
+        try:
+            result = response.json()
+            for task in result.get("tasks", []):
+                items = task.get("result", [{}])[0].get("items", [])
                 expanded.extend(items)
-            except (KeyError, IndexError):
-                continue
+        except (KeyError, IndexError):
+            pass
     return expanded
 
 # Step 3: Ask Grok if keyword is article-worthy and get title
@@ -89,7 +90,7 @@ if url_input and st.button("Discover Topics"):
     with st.spinner("🔍 Fetching keywords from Magicbricks page..."):
         mb_keywords = fetch_keywords_for_url(url_input)
 
-    base_keywords = list(set([k["keyword"] for k in mb_keywords if k.get("search_volume", 0) > 0]))  # Temporarily lowered to 0 for testing
+    base_keywords = list(set([k["keyword"] for k in mb_keywords if k.get("search_volume", 0) > 0]))
 
     if not base_keywords:
         st.warning("No valid keywords found for this URL.")
