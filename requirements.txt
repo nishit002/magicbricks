@@ -10,3 +10,4 @@ fpdf
 groq
 pandas
 beautifulsoup4
+openpyxl
