@@ -1,9 +1,9 @@
 import streamlit as st
+from groq import Groq
 import pandas as pd
 import requests
-from groq import Groq
+from bs4 import BeautifulSoup
 import os
-import json
 from datetime import datetime, timedelta
 
 # Streamlit page configuration
@@ -41,9 +41,9 @@ def fetch_magicbricks_data():
     }
     return pd.DataFrame(data)
 
-# Function to query Grok API
+# Function to query Groq API
 def query_grok(prompt, model="mixtral-8x7b-32768"):
-    client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+    client = Groq(api_key=st.secrets["general"]["GROQ_API_KEY"])
     try:
         response = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
@@ -52,7 +52,7 @@ def query_grok(prompt, model="mixtral-8x7b-32768"):
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"Error querying Grok API: {str(e)}"
+        return f"Error querying Groq API: {str(e)}"
 
 # Simulated Tabbly integration for advertiser calls
 def call_advertiser(property_id):
@@ -158,7 +158,7 @@ if prompt := st.chat_input("Ask about properties (e.g., 'Show 2 BHK apartments i
             "content": "No properties found. Try relaxing some filters or exploring nearby localities."
         })
 
-    # Prepare context for Grok
+    # Prepare context for Groq
     if not filtered_df.empty:
         context = "Here are some properties from MagicBricks:\n"
         for _, row in filtered_df.iterrows():
@@ -170,7 +170,7 @@ if prompt := st.chat_input("Ask about properties (e.g., 'Show 2 BHK apartments i
     # Combine user prompt with context
     full_prompt = f"User query: {prompt}\nContext: {context}\nRespond as a helpful real estate assistant. Use nudges and preference capture as per MagicBricks AI Co-Pilot guidelines."
 
-    # Query Grok API
+    # Query Groq API
     with st.chat_message("assistant"):
         with st.spinner("Fetching response..."):
             response = query_grok(full_prompt, model)
