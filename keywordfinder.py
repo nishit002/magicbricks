@@ -23,16 +23,21 @@ def fetch_keywords_for_url(url):
     }
     response = requests.post(endpoint, auth=HTTPBasicAuth(DFS_LOGIN, DFS_PASSWORD), json=payload)
 
+    st.write("API Status Code:", response.status_code)  # Debug status
+    st.write("API Response:", response.text)  # Debug full response
+
     if response.status_code != 200:
         st.error(f"Failed to fetch keywords from Magicbricks URL: {response.status_code}")
-        st.write("API Response:", response.text)  # Debug output
         return []
 
     result = response.json()
-    st.write("Raw API Result:", result)  # Debug output
+    st.write("Raw API Result:", result)  # Debug parsed result
     try:
-        return result["tasks"][0]["result"][0]["items"]
-    except (KeyError, IndexError):
+        items = result["tasks"][0]["result"][0]["items"]
+        st.write("Extracted Items:", items)  # Debug extracted items
+        return items
+    except (KeyError, IndexError) as e:
+        st.error(f"Error parsing API response: {str(e)}")
         return []
 
 # Step 2: Get keyword expansions from DataForSEO for each keyword
@@ -84,7 +89,7 @@ if url_input and st.button("Discover Topics"):
     with st.spinner("🔍 Fetching keywords from Magicbricks page..."):
         mb_keywords = fetch_keywords_for_url(url_input)
 
-    base_keywords = list(set([k["keyword"] for k in mb_keywords if k.get("search_volume", 0) > 50]))
+    base_keywords = list(set([k["keyword"] for k in mb_keywords if k.get("search_volume", 0) > 0]))  # Temporarily lowered to 0 for testing
 
     if not base_keywords:
         st.warning("No valid keywords found for this URL.")
