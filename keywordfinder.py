@@ -7,94 +7,110 @@ import json
 
 st.set_page_config(layout="wide")
 st.title("🧠 AI Content Gap Finder for Real Estate")
-st.write("Generate high-volume article ideas not covered by Magicbricks")
+st.write("Enter a Magicbricks URL to discover untapped content opportunities.")
 
 # Load secrets
 DFS_LOGIN = st.secrets["dataforseo"]["login"]
 DFS_PASSWORD = st.secrets["dataforseo"]["password"]
 GROK_API_KEY = st.secrets["grok"]["api_key"]
 
-# Step 1: Call DataForSEO Keywords for Site
-def fetch_keywords_from_multiple_sites(sites):
-    all_keywords = []
-    url = "https://api.dataforseo.com/v3/keywords_data/google_ads/keywords_for_site/live"
+# Step 1: Fetch keywords for provided Magicbricks page
+def fetch_keywords_for_url(url):
+    endpoint = "https://api.dataforseo.com/v3/keywords_data/google_ads/keywords_for_url/live"
+    payload = {
+        "target": url,
+        "language_code": "en",
+        "location_code": 2356  # India
+    }
+    response = requests.post(endpoint, auth=HTTPBasicAuth(DFS_LOGIN, DFS_PASSWORD), json=payload)
 
-    for site in sites:
+    if response.status_code != 200:
+        st.error(f"Failed to fetch keywords from Magicbricks URL: {response.status_code}")
+        return []
+
+    result = response.json()
+    try:
+        return result["tasks"][0]["result"][0]["items"]
+    except:
+        return []
+
+# Step 2: Get keyword ideas from DataForSEO for each keyword
+def get_keyword_expansions(keywords):
+    endpoint = "https://api.dataforseo.com/v3/keywords_data/google_ads/keywords_for_keywords/live"
+    expanded = []
+    for k in keywords:
         payload = {
-            "target": site,
+            "keywords": [k],
             "language_code": "en",
-            "location_code": 2356  # India
+            "location_code": 2356
         }
-        response = requests.post(url, auth=HTTPBasicAuth(DFS_LOGIN, DFS_PASSWORD), json=payload)
+        resp = requests.post(endpoint, auth=HTTPBasicAuth(DFS_LOGIN, DFS_PASSWORD), json=payload)
+        if resp.status_code == 200:
+            try:
+                items = resp.json()["tasks"][0]["result"][0]["items"]
+                expanded.extend(items)
+            except:
+                continue
+    return expanded
 
-        if response.status_code != 200:
-            st.warning(f"{site} failed: {response.status_code}")
-            continue
-
-        result = response.json()
-        try:
-            if result.get("tasks") and result["tasks"][0].get("result"):
-                items = result["tasks"][0]["result"][0].get("items", [])
-                all_keywords.extend(items)
-        except (KeyError, IndexError, TypeError):
-            st.warning(f"Invalid structure for {site}, skipping.")
-            continue
-
-    return all_keywords
-
-# Step 2: Ask Grok if keyword is article-worthy and get title
+# Step 3: Ask Grok if keyword is article-worthy and get title
 def classify_with_grok(keyword):
     prompt = f"""
 You are an SEO strategist. For the keyword: '{keyword}', determine:
 1. Is this keyword suitable for a blog/article? (Yes/No)
 2. If Yes, suggest an engaging title.
 3. Identify the intent (How-To, Listicle, FAQ, Explainer)
-Respond in JSON format with keys: article_worthy, title, intent
+4. Suggest 2 closely related content topics.
+Respond in JSON format with keys: article_worthy, title, intent, related_topics
 """
     response = requests.post(
         "https://api.grok.xai.com/v1/completions",
         headers={"Authorization": f"Bearer {GROK_API_KEY}"},
-        json={"prompt": prompt, "max_tokens": 200}
+        json={"prompt": prompt, "max_tokens": 300}
     )
     if response.status_code == 200:
         try:
-            parsed = json.loads(response.json()["text"].strip())
-            return parsed
-        except Exception:
-            return {"article_worthy": "No", "title": "", "intent": ""}
-    else:
-        return {"article_worthy": "No", "title": "", "intent": ""}
+            return json.loads(response.json()["text"].strip())
+        except:
+            return {"article_worthy": "No", "title": "", "intent": "", "related_topics": []}
+    return {"article_worthy": "No", "title": "", "intent": "", "related_topics": []}
 
-# UI to trigger
-if st.button("🔍 Discover Topics"):
-    with st.spinner("Fetching keywords from multiple real estate sites..."):
-        raw_keywords = fetch_keywords_from_multiple_sites(["housing.com", "proptiger.com", "nobroker.in", "99acres.com"])
+# UI section
+url_input = st.text_input("🔗 Enter a Magicbricks URL to analyze:")
 
-    if not raw_keywords:
+if url_input and st.button("Discover Topics"):
+    with st.spinner("🔍 Fetching keywords from Magicbricks page..."):
+        mb_keywords = fetch_keywords_for_url(url_input)
+
+    base_keywords = list(set([k["keyword"] for k in mb_keywords if k.get("search_volume", 0) > 50]))
+
+    if not base_keywords:
+        st.warning("No valid keywords found for this URL.")
         st.stop()
 
-    filtered = [k for k in raw_keywords if k.get("search_volume", 0) > 100 and not any(b in k.get("keyword", "") for b in ["magicbricks", "login", "property id"])]
-    st.success(f"Filtered {len(filtered)} keywords with volume > 100")
+    with st.spinner("💡 Expanding to find new keyword opportunities..."):
+        expanded = get_keyword_expansions(base_keywords)
 
-    full_keywords = pd.DataFrame(filtered)[["keyword", "search_volume", "cpc", "competition"]].rename(columns={
-        "keyword": "Keyword", "search_volume": "Search Volume", "cpc": "CPC", "competition": "Competition"
+    candidates = [k for k in expanded if k.get("search_volume", 0) > 100 and not any(b in k["keyword"] for b in ["magicbricks", "login"])]
+    df_all = pd.DataFrame(candidates)[["keyword", "search_volume", "competition"]].rename(columns={
+        "keyword": "Keyword", "search_volume": "Search Volume", "competition": "Competition"
     })
-    st.subheader("📊 All High-Volume Keywords")
-    st.dataframe(full_keywords)
+    st.subheader("📊 Keyword Ideas Based on Magicbricks URL")
+    st.dataframe(df_all)
 
-    st.subheader("🤖 Article Ideas via AI")
-    records = []
-    with st.spinner("Using AI to filter and enhance topics..."):
-        for k in filtered[:50]:
-            g = classify_with_grok(k["keyword"])
-            if g["article_worthy"].lower() == "yes":
-                records.append({
-                    "Keyword": k["keyword"],
-                    "Volume": k["search_volume"],
-                    "Title Suggestion": g["title"],
-                    "Intent": g["intent"]
+    st.subheader("🤖 AI-Enhanced Article Ideas")
+    enriched = []
+    with st.spinner("Using AI to classify and suggest content topics..."):
+        for kw in df_all["Keyword"].head(50):
+            result = classify_with_grok(kw)
+            if result["article_worthy"].lower() == "yes":
+                enriched.append({
+                    "Keyword": kw,
+                    "Title Suggestion": result["title"],
+                    "Intent": result["intent"],
+                    "Related Topics": ", ".join(result["related_topics"])
                 })
 
-    df = pd.DataFrame(records)
-    st.dataframe(df)
-    st.download_button("Download CSV", df.to_csv(index=False), "topic_suggestions.csv")
+    df_final = pd.DataFrame(enriched)
+    st.dataframe(df_final)
+    st.download_button("⬇️ Download Suggestions", df_final.to_csv(index=False), "final_topics.csv")
