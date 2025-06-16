@@ -66,12 +66,15 @@ def call_advertiser(property_id):
 # Load data
 df = fetch_magicbricks_data()
 
+# Initialize filtered_df globally
+filtered_df = df.copy()  # Default to full dataset if no prompt
+
 # Streamlit UI
 st.title("MagicBricks AI Co-Pilot")
 st.write("Your personal assistant for finding the perfect property!")
 
 # Model selection
-model = st.selectbox("Select Grok Model", ["mixtral-8x7b-32768", "llama3-70b-8192", "llama3-8b-8192"])
+model = st.selectbox("Select Groq Model", ["mixtral-8x7b-32768", "llama3-70b-8192", "llama3-8b-8192"])
 
 # Onboarding for first-time users
 if st.session_state.first_time:
@@ -133,7 +136,7 @@ if prompt := st.chat_input("Ask about properties (e.g., 'Show 2 BHK apartments i
         st.session_state.user_profile["soft_prefs"].append(prompt_lower)
 
     # Filter data based on user profile
-    filtered_df = df
+    filtered_df = df.copy()  # Reset filtered_df for each new prompt
     if st.session_state.user_profile["locality"]:
         filtered_df = filtered_df[filtered_df["city"].str.lower() == st.session_state.user_profile["locality"].lower()]
     if st.session_state.user_profile["bhk"]:
@@ -218,3 +221,10 @@ if not st.session_state.user_profile["budget"] or not st.session_state.user_prof
             "role": "assistant",
             "content": "Got your preferences! Let me find some properties for you."
         })
+
+        # Re-filter based on saved preferences
+        filtered_df = df.copy()
+        if st.session_state.user_profile["locality"]:
+            filtered_df = filtered_df[filtered_df["city"].str.lower() == st.session_state.user_profile["locality"].lower()]
+        if st.session_state.user_profile["bhk"]:
+            filtered_df = filtered_df[filtered_df["bhk"].str.lower() == st.session_state.user_profile["bhk"].lower()]
