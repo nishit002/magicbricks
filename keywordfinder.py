@@ -25,9 +25,11 @@ def fetch_keywords_for_url(url):
 
     if response.status_code != 200:
         st.error(f"Failed to fetch keywords from Magicbricks URL: {response.status_code}")
+        st.write("API Response:", response.text)  # Debug output
         return []
 
     result = response.json()
+    st.write("Raw API Result:", result)  # Debug output
     try:
         return result["tasks"][0]["result"][0]["items"]
     except (KeyError, IndexError):
