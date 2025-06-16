@@ -30,8 +30,12 @@ def fetch_keywords_from_site(site="housing.com"):
 
     result = response.json()
     try:
-        return result["tasks"][0]["result"][0]["items"]
-    except (KeyError, IndexError):
+        if result.get("tasks") and result["tasks"][0].get("result"):
+            return result["tasks"][0]["result"][0].get("items", [])
+        else:
+            st.error("No keyword results returned. Check if the domain has sufficient data.")
+            return []
+    except (KeyError, IndexError, TypeError):
         st.error("Invalid response structure from DataForSEO API.")
         return []
 
@@ -62,6 +66,9 @@ Respond in JSON format with keys: article_worthy, title, intent
 if st.button("🔍 Discover Topics"):
     with st.spinner("Fetching keywords from housing.com..."):
         raw_keywords = fetch_keywords_from_site()
+
+    if not raw_keywords:
+        st.stop()
 
     filtered = [k for k in raw_keywords if k.get("search_volume", 0) > 100 and not any(b in k.get("keyword", "") for b in ["magicbricks", "99acres", "login", "property id"])]
     st.success(f"Filtered {len(filtered)} keywords with volume > 100")
