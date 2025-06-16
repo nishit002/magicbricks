@@ -11,3 +11,5 @@ groq
 pandas
 beautifulsoup4
 openpyxl
+asyncio
+platform
