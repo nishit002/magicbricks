@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import requests
 from requests.auth import HTTPBasicAuth
+import json
 
 st.set_page_config(layout="wide")
 st.title("🧠 AI Content Gap Finder for Real Estate")
@@ -22,15 +23,19 @@ def fetch_keywords_from_site(site="housing.com"):
         "location_code": 2356  # India
     }
     response = requests.post(url, auth=HTTPBasicAuth(DFS_LOGIN, DFS_PASSWORD), json=payload)
-    if response.status_code == 200:
-        result = response.json()
+
+    if response.status_code != 200:
+        st.error(f"DataForSEO error {response.status_code}: {response.text}")
+        return []
+
+    result = response.json()
+    try:
         return result["tasks"][0]["result"][0]["items"]
-    else:
-        st.error(f"DataForSEO API error: {response.status_code}")
+    except (KeyError, IndexError):
+        st.error("Invalid response structure from DataForSEO API.")
         return []
 
 # Step 2: Ask Grok if keyword is article-worthy and get title
-
 def classify_with_grok(keyword):
     prompt = f"""
 You are an SEO strategist. For the keyword: '{keyword}', determine:
@@ -46,9 +51,9 @@ Respond in JSON format with keys: article_worthy, title, intent
     )
     if response.status_code == 200:
         try:
-            parsed = response.json()["text"]
-            return eval(parsed)
-        except:
+            parsed = json.loads(response.json()["text"].strip())
+            return parsed
+        except Exception as e:
             return {"article_worthy": "No", "title": "", "intent": ""}
     else:
         return {"article_worthy": "No", "title": "", "intent": ""}
@@ -58,9 +63,16 @@ if st.button("🔍 Discover Topics"):
     with st.spinner("Fetching keywords from housing.com..."):
         raw_keywords = fetch_keywords_from_site()
 
-    filtered = [k for k in raw_keywords if k["search_volume"] > 100 and not any(b in k["keyword"] for b in ["magicbricks", "99acres", "login", "property id"])]
+    filtered = [k for k in raw_keywords if k.get("search_volume", 0) > 100 and not any(b in k.get("keyword", "") for b in ["magicbricks", "99acres", "login", "property id"])]
     st.success(f"Filtered {len(filtered)} keywords with volume > 100")
 
+    full_keywords = pd.DataFrame(filtered)[["keyword", "search_volume", "cpc", "competition"]].rename(columns={
+        "keyword": "Keyword", "search_volume": "Search Volume", "cpc": "CPC", "competition": "Competition"
+    })
+    st.subheader("📊 All High-Volume Keywords")
+    st.dataframe(full_keywords)
+
+    st.subheader("🤖 Article Ideas via AI")
     records = []
     with st.spinner("Using AI to filter and enhance topics..."):
         for k in filtered[:50]:
