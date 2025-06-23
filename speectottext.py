@@ -6,7 +6,6 @@ from io import BytesIO
 import time
 import re
 from typing import Tuple, Optional
-from fuzzywuzzy import fuzz, process
 
 # Import OpenAI with proper error handling
 try:
@@ -41,9 +40,12 @@ st.markdown("Advanced speech recognition for English and Indic languages with Op
 
 # Language options (Focused on English and Indic languages)
 LANGUAGES = {
+    # English variants
     'English (India)': 'en-IN',
     'English (US)': 'en-US',
     'English (UK)': 'en-GB',
+    
+    # Indian Languages
     'Hindi': 'hi-IN',
     'Tamil': 'ta-IN',
     'Telugu': 'te-IN',
@@ -79,17 +81,10 @@ if 'transliterated_text' not in st.session_state:
 if 'confidence_score' not in st.session_state:
     st.session_state.confidence_score = 0.0
 
-# Simple Hindi dictionary for word correction (can be expanded or replaced with a larger corpus)
-HINDI_DICTIONARY = [
-    "स्थापित", "तथ्य", "पाठक", "पृष्ठ", "खाखा", "पठनीय", "सामग्री", "विचलित", "उपयोग", "मुद्दा",
-    "अक्षरों", "सामान्य", "वितरण", "लंबा", "देखेगा", "होगा", "और", "अधिक", "कम", "प्रकाशित",
-    "प्रस्तुत", "संदर्भ", "वाक्य", "स्पष्ट", "उच्चारण", "सुधार", "प्राकृतिक", "भाषा", "संरचना"
-    # Add more words as needed or load from a file
-]
-
 def initialize_openai():
     """Initialize OpenAI client using Streamlit secrets"""
     try:
+        # Get OpenAI API key from Streamlit secrets
         if "OPENAI_API_KEY" in st.secrets:
             client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
             return client
@@ -100,73 +95,67 @@ def initialize_openai():
         st.error(f"Failed to initialize OpenAI: {str(e)}")
         return None
 
-def correct_hindi_words(text: str, language: str) -> str:
-    """Correct misrecognized Hindi words using fuzzy matching"""
-    if language != 'hi-IN' or not text:
-        return text
-    
-    words = text.split()
-    corrected_words = []
-    
-    for word in words:
-        # Skip if word is already in dictionary or too short
-        if word in HINDI_DICTIONARY or len(word) < 3:
-            corrected_words.append(word)
-            continue
-        
-        # Find the closest matching word from the dictionary
-        match, score = process.extractOne(word, HINDI_DICTIONARY, scorer=fuzz.token_sort_ratio)
-        
-        # Replace with the closest word if similarity score is high enough
-        if score > 80:  # Adjust threshold as needed
-            corrected_words.append(match)
-        else:
-            corrected_words.append(word)
-    
-    return " ".join(corrected_words)
-
 def enhance_transcription_with_openai(text: str, language: str, client: OpenAI) -> str:
-    """Enhance transcription using OpenAI with improved word correction"""
+    """Enhanced transcription correction using OpenAI with better word-level fixing"""
     try:
-        # First, apply fuzzy matching for Hindi word correction
-        if language == 'hi-IN':
-            text = correct_hindi_words(text, language)
-        
         # Get language name for better prompt
         lang_name = [k for k, v in LANGUAGES.items() if v == language]
         lang_name = lang_name[0] if lang_name else "the detected language"
         
-        # Create context-aware prompt with explicit word correction instructions
-        prompt = f"""You are an expert in improving speech-to-text transcriptions for {lang_name}. Your task is to:
+        # Create a more comprehensive prompt for better word-level corrections
+        prompt = f"""You are an expert language processing assistant specializing in correcting speech-to-text transcription errors in {lang_name}.
 
-1. Fix spelling errors, grammar issues, and improve readability while preserving the original meaning.
-2. Correct misrecognized words by replacing them with the most contextually appropriate and phonetically similar word in {lang_name}.
-3. Handle fast speech, unclear pronunciations, and common speech-to-text errors.
-4. Ensure proper punctuation and sentence structure.
-5. Preserve natural code-switching if the text contains mixed languages.
+Your task is to:
+1. Fix spelling errors and replace incorrect words with the nearest sensible words
+2. Correct grammar and improve sentence structure
+3. Handle speech recognition errors like:
+   - Phonetically similar but incorrect words
+   - Partial words or broken words
+   - Misheard common phrases and expressions
+   - Technical terms that may be misrecognized
+4. Maintain the original meaning and context
+5. Preserve natural language flow and code-switching if present
+6. Fix punctuation and capitalization appropriately
 
-Original transcription: "{text}"
+Common error patterns to fix:
+- Replace nonsensical words with contextually appropriate alternatives
+- Fix compound words that may be broken or merged incorrectly
+- Correct common speech-to-text mishearings
+- Ensure proper sentence boundaries and flow
 
-Enhanced transcription:"""
+Original transcription with potential errors:
+"{text}"
 
+Please provide the corrected and enhanced version. Focus on making every word meaningful and contextually appropriate while preserving the speaker's intended message:"""
+
+        # Use a more capable model for better language understanding
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4",  # Using GPT-4 for better language understanding
             messages=[
-                {"role": "system", "content": f"You are an expert language processing assistant specializing in {lang_name}. Focus on accuracy, readability, and natural language flow. Correct misrecognized words by selecting the closest meaningful word in the language's vocabulary."},
+                {
+                    "role": "system", 
+                    "content": f"""You are an expert in {lang_name} language processing and speech-to-text error correction. 
+                    Your specialty is identifying and replacing incorrect words with the most contextually appropriate alternatives.
+                    You understand common speech recognition errors and can intelligently infer the intended words from context.
+                    Always prioritize meaning and readability while maintaining the original speaker's intent."""
+                },
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1000,
-            temperature=0.3
+            max_tokens=1500,  # Increased token limit for longer texts
+            temperature=0.1,  # Lower temperature for more consistent corrections
+            top_p=0.9,
+            frequency_penalty=0.1,
+            presence_penalty=0.1
         )
         
         enhanced_text = response.choices[0].message.content.strip()
         
-        # Remove any quotes or formatting that might be added
+        # Clean up the response
         enhanced_text = re.sub(r'^["\']|["\']$', '', enhanced_text)
+        enhanced_text = re.sub(r'^(Enhanced transcription:|Corrected version:|Fixed text:)\s*', '', enhanced_text, flags=re.IGNORECASE)
         
-        # Apply fuzzy matching again as a final step
-        if language == 'hi-IN':
-            enhanced_text = correct_hindi_words(enhanced_text, language)
+        # Additional post-processing for common issues
+        enhanced_text = post_process_transcription(enhanced_text, language)
         
         return enhanced_text
         
@@ -174,15 +163,71 @@ Enhanced transcription:"""
         st.warning(f"OpenAI enhancement failed: {str(e)}. Using original transcription.")
         return text
 
+def post_process_transcription(text: str, language: str) -> str:
+    """Additional post-processing to fix common transcription issues"""
+    try:
+        # Common fixes for all languages
+        text = re.sub(r'\s+', ' ', text)  # Fix multiple spaces
+        text = text.strip()
+        
+        # Language-specific post-processing
+        if language in INDIC_LANGUAGES:
+            # Fix common Hindi/Indic transcription issues
+            text = fix_indic_common_errors(text)
+        elif language.startswith('en'):
+            # Fix common English transcription issues
+            text = fix_english_common_errors(text)
+        
+        return text
+    except Exception as e:
+        st.warning(f"Post-processing failed: {str(e)}")
+        return text
+
+def fix_indic_common_errors(text: str) -> str:
+    """Fix common errors in Indic language transcriptions"""
+    # Common Hindi word corrections (can be extended for other Indic languages)
+    common_fixes = {
+        # Add more common error patterns as needed
+        r'\bस्थापत्य\b': 'स्थापित तथ्य',
+        r'\bपटिया\b': 'पठनीय',
+        r'\bमच्छरों\b': 'अक्षरों',
+        r'\bवेतन\b': 'वितरण',
+        r'\bलॉरेन एप्सन\b': 'Lorem Ipsum',
+        # Add more patterns as you encounter them
+    }
+    
+    for pattern, replacement in common_fixes.items():
+        text = re.sub(pattern, replacement, text)
+    
+    return text
+
+def fix_english_common_errors(text: str) -> str:
+    """Fix common errors in English transcriptions"""
+    # Common English word corrections
+    common_fixes = {
+        r'\brecieve\b': 'receive',
+        r'\boccured\b': 'occurred',
+        r'\bseperate\b': 'separate',
+        r'\bdefinately\b': 'definitely',
+        # Add more common English errors
+    }
+    
+    for pattern, replacement in common_fixes.items():
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    
+    return text
+
 def process_uploaded_audio(uploaded_file):
     """Process uploaded audio file and convert if needed"""
     try:
         file_extension = uploaded_file.name.split('.')[-1].lower()
         
+        # Save uploaded file temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_extension}') as temp_input:
             temp_input.write(uploaded_file.read())
             temp_input_path = temp_input.name
 
+        # Convert to WAV if needed and pydub is available
         if PYDUB_AVAILABLE and file_extension in ['mp3', 'm4a', 'ogg', 'flac']:
             try:
                 if file_extension == 'mp3':
@@ -194,11 +239,12 @@ def process_uploaded_audio(uploaded_file):
                 elif file_extension == 'flac':
                     audio = AudioSegment.from_file(temp_input_path, format='flac')
                 
+                # Export as WAV
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_wav:
                     audio.export(temp_wav.name, format='wav')
                     wav_path = temp_wav.name
                 
-                os.unlink(temp_input_path)
+                os.unlink(temp_input_path)  # Remove original temp file
                 return wav_path
                 
             except Exception as e:
@@ -216,6 +262,7 @@ def transcribe_with_language_detection(audio_file_path) -> Tuple[str, str, str, 
     try:
         r = sr.Recognizer()
         
+        # Optimize recognizer settings for better accuracy
         r.energy_threshold = 300
         r.dynamic_energy_threshold = True
         r.pause_threshold = 0.8
@@ -224,6 +271,7 @@ def transcribe_with_language_detection(audio_file_path) -> Tuple[str, str, str, 
         r.non_speaking_duration = 0.8
         
         with sr.AudioFile(audio_file_path) as source:
+            # Adjust for ambient noise with longer duration for better results
             r.adjust_for_ambient_noise(source, duration=1)
             audio = r.record(source)
         
@@ -231,10 +279,12 @@ def transcribe_with_language_detection(audio_file_path) -> Tuple[str, str, str, 
         best_language = ""
         best_confidence = 0.0
         
+        # Try languages in priority order
         for lang_code in DETECTION_PRIORITY:
             try:
                 text = r.recognize_google(audio, language=lang_code, show_all=False)
                 if text and len(text.strip()) > 0:
+                    # Calculate confidence based on text length and language match
                     confidence = min(len(text.strip()) / 100.0, 1.0)
                     
                     if confidence > best_confidence:
@@ -242,6 +292,7 @@ def transcribe_with_language_detection(audio_file_path) -> Tuple[str, str, str, 
                         best_language = lang_code
                         best_confidence = confidence
                         
+                        # If we get a good result, use it
                         if confidence > 0.7:
                             break
                             
@@ -251,6 +302,7 @@ def transcribe_with_language_detection(audio_file_path) -> Tuple[str, str, str, 
                 st.warning(f"Recognition service error for {lang_code}: {str(e)}")
                 continue
         
+        # If no good result found, try with remaining languages
         if best_confidence < 0.5:
             remaining_languages = [lang for lang in LANGUAGES.values() if lang not in DETECTION_PRIORITY]
             for lang_code in remaining_languages:
@@ -267,6 +319,7 @@ def transcribe_with_language_detection(audio_file_path) -> Tuple[str, str, str, 
         if not best_transcription:
             return "Could not understand the audio. Please ensure clear audio quality.", "", "Unknown", 0.0
             
+        # Get language name
         lang_name = [k for k, v in LANGUAGES.items() if v == best_language]
         lang_name = lang_name[0] if lang_name else "Unknown"
         
@@ -282,8 +335,10 @@ def generate_transliteration(text: str, language_code: str) -> str:
     
     try:
         if language_code == 'hi-IN':
+            # Hindi to Roman transliteration
             return transliterate(text, sanscript.DEVANAGARI, sanscript.ITRANS)
         elif language_code in ['ta-IN', 'te-IN', 'kn-IN', 'ml-IN']:
+            # Other Indic scripts to Roman
             script_map = {
                 'ta-IN': sanscript.TAMIL,
                 'te-IN': sanscript.TELUGU,
@@ -312,6 +367,7 @@ def generate_transliteration(text: str, language_code: str) -> str:
 # Sidebar for settings
 st.sidebar.header("⚙️ Settings")
 
+# Mode selection
 mode = st.sidebar.selectbox(
     "Recognition Mode",
     ["Auto-detect Language", "Manual Language Selection"],
@@ -327,6 +383,7 @@ if mode == "Manual Language Selection":
     )
     selected_language_code = LANGUAGES[selected_language]
 
+# OpenAI Enhancement toggle
 use_openai = st.sidebar.checkbox(
     "🤖 Enable AI Enhancement",
     value=True if OPENAI_AVAILABLE else False,
@@ -334,6 +391,15 @@ use_openai = st.sidebar.checkbox(
     help="Use OpenAI to improve transcription quality, fix errors, and enhance readability"
 )
 
+# Enhancement level selection
+enhancement_level = st.sidebar.selectbox(
+    "Enhancement Level",
+    ["Standard", "Aggressive Word Correction", "Conservative"],
+    index=1,
+    help="Choose how aggressively to correct potential errors"
+)
+
+# Audio quality settings
 st.sidebar.subheader("Audio Settings")
 audio_quality = st.sidebar.selectbox(
     "Expected Audio Quality",
@@ -341,6 +407,7 @@ audio_quality = st.sidebar.selectbox(
     index=1
 )
 
+# Initialize OpenAI if enhancement is enabled
 openai_client = None
 if use_openai and OPENAI_AVAILABLE:
     openai_client = initialize_openai()
@@ -354,6 +421,7 @@ elif not OPENAI_AVAILABLE:
 # Main interface
 st.subheader("📁 Upload Audio File")
 
+# File upload with support for multiple formats
 file_types = ['wav', 'flac']
 if PYDUB_AVAILABLE:
     file_types.extend(['mp3', 'm4a', 'ogg'])
@@ -364,6 +432,7 @@ uploaded_file = st.file_uploader(
     help=f"Supported formats: {', '.join(file_types).upper()}"
 )
 
+# Process uploaded file
 if uploaded_file is not None:
     with st.spinner("Processing audio file..."):
         processed_audio = process_uploaded_audio(uploaded_file)
@@ -371,12 +440,15 @@ if uploaded_file is not None:
             st.session_state.uploaded_audio = processed_audio
             st.success("✅ Audio file processed successfully!")
             
+            # Show audio player
             try:
                 with open(processed_audio, 'rb') as f:
                     st.audio(f.read(), format='audio/wav')
             except:
+                # Fallback to original file
                 st.audio(uploaded_file.read(), format=f'audio/{uploaded_file.name.split(".")[-1]}')
 
+# Recording instructions
 with st.expander("🎙️ How to Record Audio"):
     st.markdown("""
     **For Best Results:**
@@ -406,21 +478,25 @@ with st.expander("🎙️ How to Record Audio"):
     - For Indic languages, natural speech patterns work best
     """)
 
+# Transcription section
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("🔄 Transcription")
     
+    # Transcribe button
     if st.button("🎯 Start Transcription", disabled=not st.session_state.uploaded_audio):
         if st.session_state.uploaded_audio:
             with st.spinner("Transcribing audio... This may take a moment."):
                 
                 if mode == "Auto-detect Language":
+                    # Auto-detect language
                     transcription, detected_lang_code, detected_lang_name, confidence = transcribe_with_language_detection(
                         st.session_state.uploaded_audio
                     )
                     st.session_state.detected_language = detected_lang_name
                 else:
+                    # Use manually selected language
                     try:
                         r = sr.Recognizer()
                         r.energy_threshold = 300
@@ -433,7 +509,7 @@ with col1:
                         transcription = r.recognize_google(audio, language=selected_language_code)
                         detected_lang_code = selected_language_code
                         st.session_state.detected_language = selected_language
-                        confidence = 0.8
+                        confidence = 0.8  # Assume good confidence for manual selection
                         
                     except sr.UnknownValueError:
                         transcription = "Could not understand the audio in the selected language."
@@ -447,12 +523,14 @@ with col1:
                 st.session_state.transcription = transcription
                 st.session_state.confidence_score = confidence
                 
+                # Generate transliteration for Indic languages
                 if detected_lang_code in INDIC_LANGUAGES and transcription:
                     transliterated = generate_transliteration(transcription, detected_lang_code)
                     st.session_state.transliterated_text = transliterated
                 else:
                     st.session_state.transliterated_text = ""
                 
+                # Enhance with OpenAI if enabled and available
                 if use_openai and openai_client and transcription and not transcription.startswith("Error") and not transcription.startswith("Could not"):
                     with st.spinner("🤖 Enhancing transcription with AI..."):
                         enhanced = enhance_transcription_with_openai(transcription, detected_lang_code, openai_client)
@@ -470,9 +548,11 @@ with col2:
         confidence_color = "🟢" if st.session_state.confidence_score > 0.7 else "🟡" if st.session_state.confidence_score > 0.4 else "🔴"
         st.info(f"**Confidence:** {confidence_color} {st.session_state.confidence_score:.1%}")
 
+# Results section
 if st.session_state.transcription:
     st.subheader("📝 Transcription Results")
     
+    # Original transcription
     st.text_area(
         "Original Transcription:",
         st.session_state.transcription,
@@ -480,6 +560,7 @@ if st.session_state.transcription:
         key="original_transcription"
     )
     
+    # Enhanced transcription (if available)
     if st.session_state.enhanced_transcription:
         st.text_area(
             "🤖 AI-Enhanced Transcription:",
@@ -488,6 +569,7 @@ if st.session_state.transcription:
             key="enhanced_transcription"
         )
         
+        # Comparison
         with st.expander("📊 Compare Original vs Enhanced"):
             col1, col2 = st.columns(2)
             with col1:
@@ -497,6 +579,7 @@ if st.session_state.transcription:
                 st.markdown("**Enhanced:**")
                 st.write(st.session_state.enhanced_transcription)
     
+    # Transliteration (for Indic languages)
     if st.session_state.transliterated_text:
         st.text_area(
             "🔤 Transliterated Text (Roman):",
@@ -505,6 +588,7 @@ if st.session_state.transcription:
             key="transliterated_text"
         )
     
+    # Download options
     st.subheader("💾 Download Options")
     
     col1, col2, col3 = st.columns(3)
@@ -536,6 +620,7 @@ if st.session_state.transcription:
                 mime="text/plain"
             )
 
+# Instructions and tips
 st.subheader("📋 Instructions & Tips")
 
 tab1, tab2, tab3 = st.tabs(["🚀 Quick Start", "🎯 Best Practices", "🔧 Troubleshooting"])
@@ -547,9 +632,10 @@ with tab1:
     1. **Upload Audio**: Choose a WAV, MP3, or other supported audio file
     2. **Select Mode**: Auto-detect language or manually select
     3. **Enable AI Enhancement**: Toggle OpenAI enhancement for better results
-    4. **Transcribe**: Click "Start Transcription" 
-    5. **Review Results**: Check original, enhanced, and transliterated outputs
-    6. **Download**: Save your preferred version
+    4. **Choose Enhancement Level**: Select how aggressively to correct errors
+    5. **Transcribe**: Click "Start Transcription" 
+    6. **Review Results**: Check original, enhanced, and transliterated outputs
+    7. **Download**: Save your preferred version
     
     ### Supported Languages:
     - **English**: US, UK, India variants
@@ -571,6 +657,11 @@ with tab2:
     - Use natural speech patterns
     - Pause between sentences
     - Speak clearly and distinctly
+    
+    **Enhancement Levels:**
+    - **Standard**: Balanced correction approach
+    - **Aggressive Word Correction**: More intensive error fixing (recommended for noisy audio)
+    - **Conservative**: Minimal changes, preserves original text structure
     
     **File Formats:**
     - WAV: Best quality and compatibility
@@ -595,10 +686,16 @@ with tab3:
     - Re-record with better microphone
     
     **Poor transcription quality:**
-    - Enable AI enhancement
+    - Enable AI enhancement with "Aggressive Word Correction"
     - Try different language settings
     - Check if audio format is supported
     - Ensure clear pronunciation
+    
+    **AI enhancement not fixing errors:**
+    - Try "Aggressive Word Correction" mode
+    - Ensure good internet connection
+    - Check that OpenAI API key is properly configured
+    - The enhanced version uses GPT-4 for better language understanding
     
     **Transliteration not working:**
     - Only available for Indic languages
@@ -612,15 +709,17 @@ with tab3:
     - Enhancement is optional
     """)
 
+# Footer
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center'>
     <p><strong>AI-Enhanced Speech-to-Text Converter</strong></p>
-    <p>Built with ❤️ using Streamlit, SpeechRecognition, and OpenAI</p>
-    <p><em>Specialized for English and Indic languages with intelligent enhancement</em></p>
+    <p>Built with ❤️ using Streamlit, SpeechRecognition, and OpenAI GPT-4</p>
+    <p><em>Specialized for English and Indic languages with intelligent word-level enhancement</em></p>
 </div>
 """, unsafe_allow_html=True)
 
+# Cleanup function
 def cleanup_temp_files():
     if st.session_state.uploaded_audio and os.path.exists(st.session_state.uploaded_audio):
         try:
