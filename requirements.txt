@@ -29,6 +29,21 @@ requests>=2.31.0
 # Additional audio dependencies (Optional - for better audio support)
 # Uncomment if you need these specific audio codecs
 # ffmpeg-python>=0.2.0
+# Core Streamlit framework
+streamlit>=1.28.0
+
+# Text-to-Speech engines
+gtts>=2.4.0
+pyttsx3>=2.90
+
+# AI Enhancement
+openai>=1.0.0
+
+# Language detection
+langdetect>=1.0.9
+
+# Additional utilities
+requests>=2.31.0
 
 # System dependencies for audio processing
 # Note: You may need to install system packages separately:
