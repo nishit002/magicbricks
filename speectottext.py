@@ -4,12 +4,6 @@ import tempfile
 import os
 from io import BytesIO
 import time
-try:
-    from pydub import AudioSegment
-    PYDUB_AVAILABLE = True
-except ImportError:
-    PYDUB_AVAILABLE = False
-    st.warning("pydub not available - only WAV files will be supported")
 
 # Configure page
 st.set_page_config(
@@ -61,7 +55,7 @@ recognition_engine = st.sidebar.selectbox(
 
 # Audio recording parameters - Using browser's built-in recorder
 def process_uploaded_audio(uploaded_file):
-    """Process uploaded audio file and convert to WAV if needed"""
+    """Process uploaded audio file"""
     try:
         # Save uploaded file temporarily
         file_extension = uploaded_file.name.split('.')[-1].lower()
@@ -70,26 +64,7 @@ def process_uploaded_audio(uploaded_file):
             tmp_file.write(uploaded_file.read())
             temp_path = tmp_file.name
         
-        # If it's already WAV, return as-is
-        if file_extension == 'wav':
-            return temp_path
-        
-        # Convert to WAV if pydub is available
-        if PYDUB_AVAILABLE and file_extension in ['mp3', 'flac', 'm4a', 'ogg', 'aac']:
-            try:
-                audio = AudioSegment.from_file(temp_path)
-                wav_path = temp_path.replace(f'.{file_extension}', '.wav')
-                audio.export(wav_path, format='wav')
-                os.unlink(temp_path)  # Remove original
-                return wav_path
-            except Exception as e:
-                st.error(f"Error converting audio: {str(e)}")
-                return temp_path
-        else:
-            # If pydub not available, suggest WAV format
-            if file_extension != 'wav':
-                st.warning(f"File format '{file_extension}' may not be supported. Please use WAV format for best results.")
-            return temp_path
+        return temp_path
         
     except Exception as e:
         st.error(f"Error processing audio file: {str(e)}")
@@ -125,14 +100,10 @@ def transcribe_audio(audio_file_path, language='en-US', engine='Google'):
 st.subheader("📁 Upload Audio File")
 
 # File upload option
-file_types = ['wav']
-if PYDUB_AVAILABLE:
-    file_types.extend(['mp3', 'flac', 'm4a', 'ogg', 'aac'])
-
 uploaded_file = st.file_uploader(
     "Choose an audio file to transcribe",
-    type=file_types,
-    help=f"Supported formats: {', '.join(file_types).upper()}"
+    type=['wav', 'flac'],
+    help="Supported formats: WAV (recommended), FLAC. For MP3 files, please convert to WAV first."
 )
 
 if uploaded_file is not None:
@@ -152,20 +123,26 @@ st.info("💡 Use your browser's built-in recording capabilities:")
 # Instructions for browser recording
 with st.expander("How to record audio in your browser"):
     st.markdown("""
-    **Option 1: Use Online Voice Recorder**
-    1. Visit: https://online-voice-recorder.com/
-    2. Click "Record" and speak
-    3. Download the audio file
-    4. Upload it here
+    **Option 1: Online Audio Converter + Voice Recorder**
+    1. Record audio: Visit https://online-voice-recorder.com/
+    2. Click "Record" and speak clearly
+    3. Download as WAV format
+    4. Upload here
     
-    **Option 2: Browser Extensions**
+    **Option 2: Convert MP3 to WAV**
+    1. If you have MP3 files, convert them at: https://convertio.co/mp3-wav/
+    2. Upload the converted WAV file here
+    
+    **Option 3: Mobile Device Recording**
+    1. Use your phone's voice recorder app
+    2. Record in high quality
+    3. Convert to WAV if needed (using online converter)
+    4. Upload here
+    
+    **Option 4: Browser Extensions**
     - Chrome: "Voice Recorder" extension
     - Firefox: "Audio Recorder" extension
-    
-    **Option 3: Mobile Device**
-    1. Use your phone's voice recorder app
-    2. Save as audio file
-    3. Upload here
+    - Save as WAV format
     """)
 
 col1, col2 = st.columns([1, 1])
@@ -244,12 +221,15 @@ st.markdown("""
 - Sphinx works offline but may be less accurate
 
 **Supported Audio Formats:**
-- WAV (recommended)
-- MP3
-- FLAC  
-- M4A
-- OGG
-- AAC
+- WAV (recommended - best compatibility)
+- FLAC (high quality, good compatibility)
+- For MP3/M4A files: Use online converters to convert to WAV first
+
+**Audio Quality Tips:**
+- Use WAV format for best results
+- Record in quiet environment
+- Speak clearly and at normal pace
+- Avoid background noise
 """)
 
 # Footer
