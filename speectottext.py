@@ -4,8 +4,12 @@ import tempfile
 import os
 from io import BytesIO
 import time
-from pydub import AudioSegment
-from pydub.utils import make_chunks
+try:
+    from pydub import AudioSegment
+    PYDUB_AVAILABLE = True
+except ImportError:
+    PYDUB_AVAILABLE = False
+    st.warning("pydub not available - only WAV files will be supported")
 
 # Configure page
 st.set_page_config(
@@ -60,20 +64,32 @@ def process_uploaded_audio(uploaded_file):
     """Process uploaded audio file and convert to WAV if needed"""
     try:
         # Save uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{uploaded_file.name.split(".")[-1]}') as tmp_file:
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_extension}') as tmp_file:
             tmp_file.write(uploaded_file.read())
             temp_path = tmp_file.name
         
-        # Convert to WAV if needed using pydub
-        file_extension = uploaded_file.name.split('.')[-1].lower()
-        if file_extension != 'wav':
-            audio = AudioSegment.from_file(temp_path)
-            wav_path = temp_path.replace(f'.{file_extension}', '.wav')
-            audio.export(wav_path, format='wav')
-            os.unlink(temp_path)  # Remove original
-            return wav_path
+        # If it's already WAV, return as-is
+        if file_extension == 'wav':
+            return temp_path
         
-        return temp_path
+        # Convert to WAV if pydub is available
+        if PYDUB_AVAILABLE and file_extension in ['mp3', 'flac', 'm4a', 'ogg', 'aac']:
+            try:
+                audio = AudioSegment.from_file(temp_path)
+                wav_path = temp_path.replace(f'.{file_extension}', '.wav')
+                audio.export(wav_path, format='wav')
+                os.unlink(temp_path)  # Remove original
+                return wav_path
+            except Exception as e:
+                st.error(f"Error converting audio: {str(e)}")
+                return temp_path
+        else:
+            # If pydub not available, suggest WAV format
+            if file_extension != 'wav':
+                st.warning(f"File format '{file_extension}' may not be supported. Please use WAV format for best results.")
+            return temp_path
         
     except Exception as e:
         st.error(f"Error processing audio file: {str(e)}")
@@ -109,10 +125,14 @@ def transcribe_audio(audio_file_path, language='en-US', engine='Google'):
 st.subheader("📁 Upload Audio File")
 
 # File upload option
+file_types = ['wav']
+if PYDUB_AVAILABLE:
+    file_types.extend(['mp3', 'flac', 'm4a', 'ogg', 'aac'])
+
 uploaded_file = st.file_uploader(
     "Choose an audio file to transcribe",
-    type=['wav', 'mp3', 'flac', 'm4a', 'ogg', 'aac'],
-    help="Supported formats: WAV, MP3, FLAC, M4A, OGG, AAC"
+    type=file_types,
+    help=f"Supported formats: {', '.join(file_types).upper()}"
 )
 
 if uploaded_file is not None:
