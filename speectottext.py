@@ -1,11 +1,11 @@
 import streamlit as st
 import speech_recognition as sr
-import pyaudio
-import wave
 import tempfile
 import os
 from io import BytesIO
 import time
+from pydub import AudioSegment
+from pydub.utils import make_chunks
 
 # Configure page
 st.set_page_config(
@@ -36,12 +36,10 @@ LANGUAGES = {
 }
 
 # Initialize session state
-if 'recording' not in st.session_state:
-    st.session_state.recording = False
-if 'recorded_audio' not in st.session_state:
-    st.session_state.recorded_audio = None
 if 'transcription' not in st.session_state:
     st.session_state.transcription = ""
+if 'uploaded_audio' not in st.session_state:
+    st.session_state.uploaded_audio = None
 
 # Sidebar for settings
 st.sidebar.header("Settings")
@@ -57,47 +55,28 @@ recognition_engine = st.sidebar.selectbox(
     index=0
 )
 
-# Audio recording parameters
-CHUNK = 1024
-FORMAT = pyaudio.paInt16
-CHANNELS = 1
-RATE = 44100
-
-def record_audio(duration=5):
-    """Record audio for specified duration"""
+# Audio recording parameters - Using browser's built-in recorder
+def process_uploaded_audio(uploaded_file):
+    """Process uploaded audio file and convert to WAV if needed"""
     try:
-        p = pyaudio.PyAudio()
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{uploaded_file.name.split(".")[-1]}') as tmp_file:
+            tmp_file.write(uploaded_file.read())
+            temp_path = tmp_file.name
         
-        stream = p.open(format=FORMAT,
-                       channels=CHANNELS,
-                       rate=RATE,
-                       input=True,
-                       frames_per_buffer=CHUNK)
+        # Convert to WAV if needed using pydub
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        if file_extension != 'wav':
+            audio = AudioSegment.from_file(temp_path)
+            wav_path = temp_path.replace(f'.{file_extension}', '.wav')
+            audio.export(wav_path, format='wav')
+            os.unlink(temp_path)  # Remove original
+            return wav_path
         
-        st.info(f"🔴 Recording for {duration} seconds...")
+        return temp_path
         
-        frames = []
-        for i in range(0, int(RATE / CHUNK * duration)):
-            data = stream.read(CHUNK)
-            frames.append(data)
-        
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-        
-        # Save to temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-            wf = wave.open(tmp_file.name, 'wb')
-            wf.setnchannels(CHANNELS)
-            wf.setsampwidth(p.get_sample_size(FORMAT))
-            wf.setframerate(RATE)
-            wf.writeframes(b''.join(frames))
-            wf.close()
-            
-            return tmp_file.name
-            
     except Exception as e:
-        st.error(f"Error recording audio: {str(e)}")
+        st.error(f"Error processing audio file: {str(e)}")
         return None
 
 def transcribe_audio(audio_file_path, language='en-US', engine='Google'):
@@ -127,50 +106,68 @@ def transcribe_audio(audio_file_path, language='en-US', engine='Google'):
         return f"An error occurred: {str(e)}"
 
 # Main interface
+st.subheader("📁 Upload Audio File")
+
+# File upload option
+uploaded_file = st.file_uploader(
+    "Choose an audio file to transcribe",
+    type=['wav', 'mp3', 'flac', 'm4a', 'ogg', 'aac'],
+    help="Supported formats: WAV, MP3, FLAC, M4A, OGG, AAC"
+)
+
+if uploaded_file is not None:
+    with st.spinner("Processing audio file..."):
+        processed_audio = process_uploaded_audio(uploaded_file)
+        if processed_audio:
+            st.session_state.uploaded_audio = processed_audio
+            st.success("✅ Audio file processed successfully!")
+            
+            # Show audio player
+            st.audio(uploaded_file.read(), format=f'audio/{uploaded_file.name.split(".")[-1]}')
+
+# Browser-based recording option
+st.subheader("🎙️ Record Audio (Browser)")
+st.info("💡 Use your browser's built-in recording capabilities:")
+
+# Instructions for browser recording
+with st.expander("How to record audio in your browser"):
+    st.markdown("""
+    **Option 1: Use Online Voice Recorder**
+    1. Visit: https://online-voice-recorder.com/
+    2. Click "Record" and speak
+    3. Download the audio file
+    4. Upload it here
+    
+    **Option 2: Browser Extensions**
+    - Chrome: "Voice Recorder" extension
+    - Firefox: "Audio Recorder" extension
+    
+    **Option 3: Mobile Device**
+    1. Use your phone's voice recorder app
+    2. Save as audio file
+    3. Upload here
+    """)
+
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.subheader("🎙️ Record Audio")
+    st.subheader("⚙️ Transcription Settings")
     
-    # Recording duration slider
-    duration = st.slider("Recording Duration (seconds)", 1, 30, 5)
-    
-    # Record button
-    if st.button("🔴 Start Recording", disabled=st.session_state.recording):
-        st.session_state.recording = True
-        audio_file = record_audio(duration)
-        
-        if audio_file:
-            st.session_state.recorded_audio = audio_file
-            st.success("✅ Recording completed!")
-        
-        st.session_state.recording = False
-    
-    # File upload option
-    st.subheader("📁 Or Upload Audio File")
-    uploaded_file = st.file_uploader(
-        "Choose an audio file",
-        type=['wav', 'mp3', 'flac', 'm4a'],
-        help="Supported formats: WAV, MP3, FLAC, M4A"
-    )
-    
-    if uploaded_file is not None:
-        # Save uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{uploaded_file.name.split(".")[-1]}') as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            st.session_state.recorded_audio = tmp_file.name
-        st.success("✅ File uploaded successfully!")
+    # Advanced options
+    with st.expander("Advanced Options"):
+        chunk_duration = st.slider("Process audio in chunks (seconds)", 10, 60, 30)
+        show_confidence = st.checkbox("Show confidence scores (when available)")
 
 with col2:
     st.subheader("📝 Transcription")
     
     # Transcribe button
-    if st.button("🔄 Transcribe Audio", disabled=not st.session_state.recorded_audio):
-        if st.session_state.recorded_audio:
-            with st.spinner("Transcribing audio..."):
+    if st.button("🔄 Transcribe Audio", disabled=not st.session_state.uploaded_audio):
+        if st.session_state.uploaded_audio:
+            with st.spinner("Transcribing audio... This may take a moment."):
                 language_code = LANGUAGES[selected_language]
                 transcription = transcribe_audio(
-                    st.session_state.recorded_audio,
+                    st.session_state.uploaded_audio,
                     language_code,
                     recognition_engine
                 )
@@ -198,10 +195,10 @@ with col2:
         )
 
 # Audio player
-if st.session_state.recorded_audio:
-    st.subheader("🔊 Recorded Audio")
+if st.session_state.uploaded_audio:
+    st.subheader("🔊 Processed Audio")
     try:
-        with open(st.session_state.recorded_audio, 'rb') as audio_file:
+        with open(st.session_state.uploaded_audio, 'rb') as audio_file:
             audio_bytes = audio_file.read()
             st.audio(audio_bytes, format='audio/wav')
     except Exception as e:
@@ -214,16 +211,25 @@ st.markdown("""
 2. **Choose Recognition Engine**: 
    - Google: More accurate, requires internet
    - Sphinx: Works offline, less accurate
-3. **Record Audio**: Click "Start Recording" and speak clearly
-4. **Or Upload File**: Upload an existing audio file
+3. **Upload Audio**: Upload an audio file (WAV, MP3, FLAC, M4A, OGG, AAC)
+4. **Or Record**: Use browser-based recording methods (see instructions above)
 5. **Transcribe**: Click "Transcribe Audio" to convert speech to text
 6. **Copy/Download**: Use the transcribed text as needed
 
 **Tips for better results:**
-- Speak clearly and at a moderate pace
-- Minimize background noise
-- Use a good quality microphone
-- Keep recordings under 1 minute for better accuracy
+- Ensure clear audio quality with minimal background noise
+- Use supported audio formats
+- For long audio files, the app will process them in chunks
+- Google recognition requires internet but is more accurate
+- Sphinx works offline but may be less accurate
+
+**Supported Audio Formats:**
+- WAV (recommended)
+- MP3
+- FLAC  
+- M4A
+- OGG
+- AAC
 """)
 
 # Footer
@@ -232,9 +238,9 @@ st.markdown("Built with ❤️ using Streamlit and SpeechRecognition")
 
 # Cleanup temporary files on app restart
 def cleanup_temp_files():
-    if st.session_state.recorded_audio and os.path.exists(st.session_state.recorded_audio):
+    if st.session_state.uploaded_audio and os.path.exists(st.session_state.uploaded_audio):
         try:
-            os.unlink(st.session_state.recorded_audio)
+            os.unlink(st.session_state.uploaded_audio)
         except:
             pass
 
