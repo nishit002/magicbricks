@@ -1,20 +1,26 @@
+# Core dependencies (Required)
 streamlit>=1.28.0
-yt-dlp>=2024.1.7
-requests>=2.31.0
-youtube-transcript-api>=0.6.1
-urllib3>=2.0.0
-python-dotenv==1.0.1
-openai>=1.3.0
-Pillow
-fpdf
-groq
-pandas
-beautifulsoup4
-openpyxl
-# Enhanced Speech-to-Text Dependencies
 SpeechRecognition>=3.10.0
+
+# AI Enhancement (Recommended)
+openai>=1.0.0
+
+# Audio processing (Recommended)
 pydub>=0.25.1
+
+# Text processing and fuzzy matching (Recommended)
+fuzzywuzzy>=0.18.0
+python-levenshtein>=0.20.0
+
+# Indic language support (Optional)
 indic-transliteration>=2.3.0
-pyaudio>=0.2.11
-fuzzywuzzy==0.18.0
-python-Levenshtein==0.25.1
+
+# Additional audio dependencies (Optional - for better audio support)
+# Uncomment if you need these specific audio codecs
+# ffmpeg-python>=0.2.0
+
+# System dependencies for audio processing
+# Note: You may need to install system packages separately:
+# Ubuntu/Debian: sudo apt-get install ffmpeg
+# macOS: brew install ffmpeg
+# Windows: Download from https://ffmpeg.org/
