@@ -68,3 +68,21 @@ requests>=2.31.0
 # Ubuntu/Debian: sudo apt-get install ffmpeg
 # macOS: brew install ffmpeg
 # Windows: Download from https://ffmpeg.org/
+# Core Streamlit framework
+streamlit>=1.28.0
+
+# Indic Parler-TTS dependencies
+torch>=1.9.0
+transformers>=4.40.0
+soundfile>=0.12.0
+accelerate>=0.20.0
+
+# Language detection
+langdetect>=1.0.9
+
+# Fallback TTS
+gtts>=2.4.0
+
+# Additional utilities
+requests>=2.31.0
+numpy>=1.21.0
