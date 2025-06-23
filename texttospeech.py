@@ -264,10 +264,20 @@ st.sidebar.header("⚙️ Voice Settings")
 # Show model status
 if PARLER_TTS_AVAILABLE and model is not None:
     st.sidebar.success("✅ Indic Parler-TTS loaded")
+    st.sidebar.info(f"Device: {'GPU' if torch.cuda.is_available() else 'CPU'}")
 else:
     st.sidebar.error("❌ Parler-TTS not available")
+    
+    # Show specific error
+    try:
+        from parler_tts import ParlerTTSForConditionalGeneration
+        st.sidebar.warning("⚠️ Parler-TTS installed but model failed to load")
+    except ImportError:
+        st.sidebar.error("📦 Parler-TTS not installed")
+        st.sidebar.markdown("Run: `pip install git+https://github.com/huggingface/parler-tts.git`")
+    
     if GTTS_AVAILABLE:
-        st.sidebar.warning("🔄 Will use Google TTS fallback")
+        st.sidebar.info("🔄 Using Google TTS fallback")
 
 # Voice style selection
 voice_style = st.sidebar.selectbox(
@@ -423,27 +433,48 @@ if st.session_state.audio_file_path:
 # Installation guide
 with st.expander("🛠️ Setup Indic Parler-TTS"):
     st.markdown("""
-    ### Install Indic Parler-TTS:
+    ### 🚨 Fix Parler-TTS Installation:
     
+    **Step 1: Install Parler-TTS**
     ```bash
     pip install git+https://github.com/huggingface/parler-tts.git
-    pip install torch soundfile transformers
     ```
     
-    ### Test installation:
+    **Step 2: Install dependencies**
+    ```bash
+    pip install torch>=1.9.0 transformers>=4.40.0 soundfile accelerate
+    ```
+    
+    **Step 3: Test installation**
     ```python
-    from parler_tts import ParlerTTSForConditionalGeneration
-    from transformers import AutoTokenizer
-    
-    model = ParlerTTSForConditionalGeneration.from_pretrained("ai4bharat/indic-parler-tts")
-    tokenizer = AutoTokenizer.from_pretrained("ai4bharat/indic-parler-tts")
+    # Test in Python console:
+    try:
+        from parler_tts import ParlerTTSForConditionalGeneration
+        print("✅ Parler-TTS installed successfully!")
+    except ImportError as e:
+        print(f"❌ Error: {e}")
     ```
     
-    ### Key Features:
-    - 21 languages supported
-    - 69 unique voices
-    - Emotion rendering for 10 languages
-    - High-quality neural synthesis
+    **Step 4: Download model (first time)**
+    ```python
+    # This downloads ~1GB model
+    from parler_tts import ParlerTTSForConditionalGeneration
+    model = ParlerTTSForConditionalGeneration.from_pretrained("ai4bharat/indic-parler-tts")
+    ```
+    
+    **Alternative Installation:**
+    ```bash
+    # If git install fails, try:
+    git clone https://github.com/huggingface/parler-tts.git
+    cd parler-tts
+    pip install -e .
+    ```
+    
+    **Troubleshooting:**
+    - Make sure you have Python 3.8+
+    - Install PyTorch first: `pip install torch`
+    - Use `--upgrade` flag if needed
+    - Restart your app after installation
     """)
 
 # Language and speaker information
