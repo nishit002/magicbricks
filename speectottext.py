@@ -4,9 +4,15 @@ import tempfile
 import os
 from io import BytesIO
 import time
-from openai import OpenAI
 import re
 from typing import Tuple, Optional
+
+# Import OpenAI with proper error handling
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
 try:
     from indic_transliteration import sanscript
     from indic_transliteration.sanscript import transliterate
@@ -279,7 +285,8 @@ if mode == "Manual Language Selection":
 # OpenAI Enhancement toggle
 use_openai = st.sidebar.checkbox(
     "🤖 Enable AI Enhancement",
-    value=True,
+    value=True if OPENAI_AVAILABLE else False,
+    disabled=not OPENAI_AVAILABLE,
     help="Use OpenAI to improve transcription quality, fix errors, and enhance readability"
 )
 
@@ -293,12 +300,14 @@ audio_quality = st.sidebar.selectbox(
 
 # Initialize OpenAI if enhancement is enabled
 openai_client = None
-if use_openai:
+if use_openai and OPENAI_AVAILABLE:
     openai_client = initialize_openai()
     if openai_client:
         st.sidebar.success("✅ OpenAI enhancement ready")
     else:
         st.sidebar.error("❌ OpenAI enhancement unavailable")
+elif not OPENAI_AVAILABLE:
+    st.sidebar.warning("⚠️ OpenAI library not installed")
 
 # Main interface
 st.subheader("📁 Upload Audio File")
