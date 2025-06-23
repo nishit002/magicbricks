@@ -2,16 +2,11 @@ import streamlit as st
 import tempfile
 import os
 import re
+import subprocess
 from typing import Optional, Tuple
 import base64
 
 # Import libraries with error handling
-try:
-    from gtts import gTTS
-    GTTS_AVAILABLE = True
-except ImportError:
-    GTTS_AVAILABLE = False
-
 try:
     from langdetect import detect
     LANGDETECT_AVAILABLE = True
@@ -19,112 +14,63 @@ except ImportError:
     LANGDETECT_AVAILABLE = False
 
 try:
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
+    import torch
+    import torchaudio
+    from TTS.api import TTS
+    AI4BHARAT_AVAILABLE = True
 except ImportError:
-    OPENAI_AVAILABLE = False
+    AI4BHARAT_AVAILABLE = False
+
+try:
+    from gtts import gTTS
+    GTTS_AVAILABLE = True
+except ImportError:
+    GTTS_AVAILABLE = False
 
 # Configure page
 st.set_page_config(
-    page_title="Fast Indic TTS",
+    page_title="AI4Bharat TTS",
     page_icon="🗣️",
     layout="wide"
 )
 
-st.title("🗣️ Fast Human-like Indic TTS")
-st.markdown("Enhanced text-to-speech with natural pace and emotion!")
+st.title("🗣️ AI4Bharat TTS")
+st.markdown("Direct text-to-speech using AI4Bharat's neural models!")
 
-# Language mapping
-INDIC_LANGUAGES = {
-    'hi': {'name': 'Hindi', 'code': 'hi', 'display': 'हिन्दी'},
-    'bn': {'name': 'Bengali', 'code': 'bn', 'display': 'বাংলা'},
-    'te': {'name': 'Telugu', 'code': 'te', 'display': 'తెలుగు'},
-    'ta': {'name': 'Tamil', 'code': 'ta', 'display': 'தমிழ்'},
-    'mr': {'name': 'Marathi', 'code': 'mr', 'display': 'मराठी'},
-    'gu': {'name': 'Gujarati', 'code': 'gu', 'display': 'ગુજરાતી'},
-    'kn': {'name': 'Kannada', 'code': 'kn', 'display': 'ಕನ್ನಡ'},
-    'ml': {'name': 'Malayalam', 'code': 'ml', 'display': 'മലയാളം'},
-    'en': {'name': 'English', 'code': 'en', 'display': 'English'}
+# AI4Bharat language mapping
+AI4BHARAT_LANGUAGES = {
+    'hi': {'name': 'Hindi', 'display': 'हिन्दी', 'model_name': 'tts_models/hi/fastpitch/fastpitch'},
+    'bn': {'name': 'Bengali', 'display': 'বাংলা', 'model_name': 'tts_models/bn/fastpitch/fastpitch'},
+    'te': {'name': 'Telugu', 'display': 'తెలుగు', 'model_name': 'tts_models/te/fastpitch/fastpitch'},
+    'ta': {'name': 'Tamil', 'display': 'தமிழ்', 'model_name': 'tts_models/ta/fastpitch/fastpitch'},
+    'mr': {'name': 'Marathi', 'display': 'मराठी', 'model_name': 'tts_models/mr/fastpitch/fastpitch'},
+    'gu': {'name': 'Gujarati', 'display': 'ગુજરાતી', 'model_name': 'tts_models/gu/fastpitch/fastpitch'},
+    'kn': {'name': 'Kannada', 'display': 'ಕನ್ನಡ', 'model_name': 'tts_models/kn/fastpitch/fastpitch'},
+    'ml': {'name': 'Malayalam', 'display': 'മലയാളം', 'model_name': 'tts_models/ml/fastpitch/fastpitch'},
+    'or': {'name': 'Odia', 'display': 'ଓଡ଼ିଆ', 'model_name': 'tts_models/or/fastpitch/fastpitch'},
+    'as': {'name': 'Assamese', 'display': 'অসমীয়া', 'model_name': 'tts_models/as/fastpitch/fastpitch'},
+    'en': {'name': 'English', 'display': 'English', 'model_name': 'tts_models/en/ljspeech/tacotron2-DDC'}
 }
 
 # Initialize session state
 if 'audio_file_path' not in st.session_state:
     st.session_state.audio_file_path = None
-if 'enhanced_text' not in st.session_state:
-    st.session_state.enhanced_text = ""
 if 'detected_language' not in st.session_state:
     st.session_state.detected_language = None
-
-def initialize_openai():
-    """Initialize OpenAI client"""
-    try:
-        if "OPENAI_API_KEY" in st.secrets:
-            return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-        else:
-            st.sidebar.error("Add OPENAI_API_KEY to Streamlit secrets")
-            return None
-    except Exception as e:
-        st.sidebar.error(f"OpenAI init failed: {str(e)}")
-        return None
-
-def enhance_text_for_dynamic_speech(text: str, language: str, client: OpenAI) -> str:
-    """Enhance text for fast, emotional, dynamic speech"""
-    try:
-        lang_name = INDIC_LANGUAGES.get(language, INDIC_LANGUAGES['en'])['name']
-        
-        prompt = f"""Transform this {lang_name} text for fast, dynamic, emotional speech delivery:
-
-RULES:
-1. Make it sound like an excited sports commentator or news anchor
-2. Add emotional words and expressions
-3. Use short, punchy sentences for speed
-4. Add natural enthusiasm and energy
-5. Remove unnecessary pauses - make it flow fast
-6. Add emphasis words but keep it natural
-7. Make it sound urgent and engaging
-8. NO slow fillers or long pauses
-
-Text: "{text}"
-
-Enhanced dynamic version:"""
-
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {
-                    "role": "system", 
-                    "content": f"""You are an expert at creating fast, dynamic, emotional {lang_name} speech content. 
-                    Make text sound like an energetic news anchor or sports commentator - fast, engaging, and full of energy.
-                    NO slow speech patterns. Focus on speed and emotion."""
-                },
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1000,
-            temperature=0.8,
-            top_p=0.9
-        )
-        
-        enhanced_text = response.choices[0].message.content.strip()
-        enhanced_text = re.sub(r'^["\']|["\']$', '', enhanced_text)
-        enhanced_text = re.sub(r'^(Enhanced.*?:|Dynamic.*?:)\s*', '', enhanced_text, flags=re.IGNORECASE)
-        
-        # Remove slow speech patterns and optimize for speed
-        enhanced_text = re.sub(r'\.{2,}', '.', enhanced_text)  # Remove multiple dots
-        enhanced_text = re.sub(r'\s+', ' ', enhanced_text)     # Clean spaces
-        
-        return enhanced_text
-        
-    except Exception as e:
-        st.warning(f"Enhancement failed: {str(e)}")
-        return text
+if 'tts_method_used' not in st.session_state:
+    st.session_state.tts_method_used = ""
 
 def detect_language(text: str) -> Tuple[str, str]:
     """Detect language from text"""
     try:
         # Script-based detection
         if re.search(r'[\u0900-\u097F]', text):
+            if any(word in text for word in ['महाराष्ट्र', 'मराठी']):
+                return 'mr', 'Marathi'
             return 'hi', 'Hindi'
         elif re.search(r'[\u0980-\u09FF]', text):
+            if any(word in text for word in ['অসম', 'আসাম']):
+                return 'as', 'Assamese'
             return 'bn', 'Bengali'
         elif re.search(r'[\u0C00-\u0C7F]', text):
             return 'te', 'Telugu'
@@ -136,30 +82,64 @@ def detect_language(text: str) -> Tuple[str, str]:
             return 'kn', 'Kannada'
         elif re.search(r'[\u0D00-\u0D7F]', text):
             return 'ml', 'Malayalam'
+        elif re.search(r'[\u0B00-\u0B7F]', text):
+            return 'or', 'Odia'
         
-        # Use langdetect for others
+        # Use langdetect for English and fallback
         if LANGDETECT_AVAILABLE:
             try:
                 detected = detect(text)
-                if detected in INDIC_LANGUAGES:
-                    return detected, INDIC_LANGUAGES[detected]['name']
+                if detected in AI4BHARAT_LANGUAGES:
+                    return detected, AI4BHARAT_LANGUAGES[detected]['name']
             except:
                 pass
         
-        return 'en', 'English'
+        return 'hi', 'Hindi'  # Default
     except:
-        return 'en', 'English'
+        return 'hi', 'Hindi'
 
-def generate_fast_speech(text: str, language_code: str) -> Optional[str]:
-    """Generate fast, dynamic speech using optimized gTTS"""
+def generate_ai4bharat_tts(text: str, language_code: str) -> Optional[str]:
+    """Generate speech using AI4Bharat TTS"""
     try:
-        # Use fast speech settings - NO slow parameter
-        tts = gTTS(
-            text=text, 
-            lang=language_code,
-            slow=False,  # Always fast
-            tld='co.in' if language_code != 'en' else 'com'
-        )
+        if not AI4BHARAT_AVAILABLE:
+            st.warning("AI4Bharat TTS not available. Install: pip install TTS torch")
+            return None
+        
+        lang_info = AI4BHARAT_LANGUAGES.get(language_code, AI4BHARAT_LANGUAGES['hi'])
+        model_name = lang_info['model_name']
+        
+        st.info(f"🚀 Using AI4Bharat {lang_info['name']} model")
+        
+        # Initialize TTS with AI4Bharat model
+        tts = TTS(model_name=model_name, progress_bar=False)
+        
+        # Generate speech
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
+        temp_file.close()
+        
+        tts.tts_to_file(text=text, file_path=temp_file.name)
+        
+        return temp_file.name
+        
+    except Exception as e:
+        st.error(f"AI4Bharat TTS failed: {str(e)}")
+        return None
+
+def fallback_to_gtts(text: str, language_code: str) -> Optional[str]:
+    """Fallback to Google TTS"""
+    try:
+        if not GTTS_AVAILABLE:
+            return None
+        
+        # Map AI4Bharat codes to gTTS codes
+        gtts_mapping = {
+            'hi': 'hi', 'bn': 'bn', 'te': 'te', 'ta': 'ta', 'mr': 'mr',
+            'gu': 'gu', 'kn': 'kn', 'ml': 'ml', 'or': 'hi', 'as': 'bn', 'en': 'en'
+        }
+        
+        gtts_lang = gtts_mapping.get(language_code, 'hi')
+        
+        tts = gTTS(text=text, lang=gtts_lang, slow=False, tld='co.in')
         
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
         tts.save(temp_file.name)
@@ -168,49 +148,49 @@ def generate_fast_speech(text: str, language_code: str) -> Optional[str]:
         return temp_file.name
         
     except Exception as e:
-        st.error(f"Speech generation failed: {str(e)}")
+        st.error(f"Google TTS fallback failed: {str(e)}")
         return None
 
-# Sidebar settings
-st.sidebar.header("⚙️ Settings")
+# Sidebar
+st.sidebar.header("⚙️ Status")
 
-use_enhancement = st.sidebar.checkbox(
-    "🤖 ChatGPT Enhancement",
-    value=True if OPENAI_AVAILABLE else False,
-    help="Make speech more dynamic and emotional"
-)
+# Show availability
+if AI4BHARAT_AVAILABLE:
+    st.sidebar.success("✅ AI4Bharat TTS available")
+else:
+    st.sidebar.error("❌ AI4Bharat TTS not installed")
 
-# Initialize OpenAI
-openai_client = None
-if use_enhancement and OPENAI_AVAILABLE:
-    openai_client = initialize_openai()
-    if openai_client:
-        st.sidebar.success("✅ ChatGPT ready")
+if GTTS_AVAILABLE:
+    st.sidebar.success("✅ Google TTS fallback available")
+else:
+    st.sidebar.error("❌ Google TTS not available")
 
 # Main interface
 input_text = st.text_area(
-    "Enter text:",
+    "Enter text for speech conversion:",
     height=150,
-    placeholder="Enter your text here for fast, dynamic speech conversion..."
+    placeholder="Type your text here in any supported language..."
 )
 
 # Sample texts
-with st.expander("📚 Try Sample Texts"):
+with st.expander("📚 Sample Texts"):
     samples = {
-        "Hindi Sports": "हेडिंग्ले में भारत की शॉर्ट-बॉल रणनीति आखिरकार रंग लाई। जेमी स्मिथ 40 रन पर आउट हो गए।",
-        "Hindi News": "आज दिल्ली में भारी बारिश के कारण जल-जमाव की स्थिति हो गई है। मेट्रो सेवाएं प्रभावित हैं।",
-        "English News": "Breaking news: The stock market has reached an all-time high today with technology stocks leading the surge."
+        "Hindi Cricket": "हेडिंग्ले में भारत की शॉर्ट-बॉल रणनीति आखिरकार रंग लाई। जेमी स्मिथ 40 रन पर आउट हो गए।",
+        "Bengali News": "আজ কলকাতায় প্রযুক্তি সম্মেলনে কৃত্রিম বুদ্ধিমত্তার নতুন অগ্রগতি নিয়ে আলোচনা হয়েছে।",
+        "Tamil News": "தமிழ்நাட்டில் இன்று தொழில்நுட்ப மாநாட்டில் செயற்கை நுண்ணறிவின் புதிய முன্নেত্রিত्ব বিষয়ে আলোচনা হয়েছে।",
+        "Telugu Tech": "తెలుగు రాష্ట్రాలలో సాంకేতికత వేगంగా అభివృద्धি చెందుতోంది।",
+        "English": "Today's technology conference showcased amazing advances in artificial intelligence."
     }
     
-    cols = st.columns(len(samples))
+    cols = st.columns(3)
     for i, (name, text) in enumerate(samples.items()):
-        with cols[i]:
+        with cols[i % 3]:
             if st.button(f"{name}", key=f"sample_{i}"):
                 st.session_state.sample_text = text
     
     if hasattr(st.session_state, 'sample_text'):
         input_text = st.text_area(
-            "Enter text:",
+            "Enter text for speech conversion:",
             value=st.session_state.sample_text,
             height=150,
             key="updated_input"
@@ -220,86 +200,102 @@ with st.expander("📚 Try Sample Texts"):
 col1, col2 = st.columns([3, 1])
 
 with col1:
-    if st.button("🚀 Generate Fast Speech", disabled=not input_text.strip(), type="primary"):
+    if st.button("🎤 Generate Speech", disabled=not input_text.strip(), type="primary"):
         if input_text.strip():
-            with st.spinner("Generating fast speech..."):
+            with st.spinner("Converting text to speech..."):
                 # Detect language
                 detected_lang_code, detected_lang_name = detect_language(input_text)
-                st.session_state.detected_language = detected_lang_name
+                st.session_state.detected_language = f"{detected_lang_name} ({AI4BHARAT_LANGUAGES[detected_lang_code]['display']})"
                 
-                # Enhance text if enabled
-                final_text = input_text
-                if use_enhancement and openai_client:
-                    enhanced_text = enhance_text_for_dynamic_speech(input_text, detected_lang_code, openai_client)
-                    st.session_state.enhanced_text = enhanced_text
-                    final_text = enhanced_text
-                else:
-                    st.session_state.enhanced_text = ""
+                # Generate speech with AI4Bharat first
+                audio_file = None
+                method_used = ""
                 
-                # Generate speech
-                if GTTS_AVAILABLE:
-                    audio_file = generate_fast_speech(final_text, detected_lang_code)
-                    if audio_file:
-                        st.session_state.audio_file_path = audio_file
-                        st.success("✅ Fast speech generated!")
-                    else:
-                        st.error("❌ Failed to generate speech")
+                if AI4BHARAT_AVAILABLE:
+                    audio_file = generate_ai4bharat_tts(input_text, detected_lang_code)
+                    method_used = "AI4Bharat"
+                
+                # Fallback to Google TTS if AI4Bharat fails
+                if not audio_file and GTTS_AVAILABLE:
+                    st.info("🔄 Using Google TTS fallback...")
+                    audio_file = fallback_to_gtts(input_text, detected_lang_code)
+                    method_used = "Google TTS"
+                
+                if audio_file:
+                    st.session_state.audio_file_path = audio_file
+                    st.session_state.tts_method_used = method_used
+                    st.success(f"✅ Speech generated using {method_used}!")
                 else:
-                    st.error("❌ gTTS not available. Install: pip install gtts")
+                    st.error("❌ Speech generation failed")
 
 with col2:
     if st.button("🗑️ Clear"):
-        for key in ['audio_file_path', 'enhanced_text', 'detected_language', 'sample_text']:
+        for key in ['audio_file_path', 'detected_language', 'sample_text', 'tts_method_used']:
             if key in st.session_state:
                 del st.session_state[key]
         st.experimental_rerun()
 
 # Results
 if st.session_state.detected_language:
-    st.success(f"**Language:** {st.session_state.detected_language}")
-
-# Text comparison
-if st.session_state.enhanced_text:
-    with st.expander("📊 Text Enhancement"):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**Original:**")
-            st.text_area("", input_text, height=100, disabled=True, key="orig")
-        with col2:
-            st.markdown("**Enhanced:**")
-            st.text_area("", st.session_state.enhanced_text, height=100, disabled=True, key="enh")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.success(f"**Language:** {st.session_state.detected_language}")
+    with col2:
+        if st.session_state.tts_method_used:
+            quality = "🏆 SOTA" if st.session_state.tts_method_used == "AI4Bharat" else "🥈 Good"
+            st.info(f"**Method:** {st.session_state.tts_method_used} {quality}")
 
 # Audio output
 if st.session_state.audio_file_path:
-    st.subheader("🔊 Fast Speech Output")
+    st.subheader("🔊 Generated Speech")
     
     try:
         with open(st.session_state.audio_file_path, 'rb') as f:
             audio_bytes = f.read()
         
-        st.audio(audio_bytes, format='audio/mp3')
+        # Determine format
+        audio_format = 'audio/wav' if st.session_state.audio_file_path.endswith('.wav') else 'audio/mp3'
+        st.audio(audio_bytes, format=audio_format)
         
         # Download
+        file_extension = 'wav' if st.session_state.audio_file_path.endswith('.wav') else 'mp3'
         st.download_button(
             label="💾 Download Audio",
             data=audio_bytes,
-            file_name=f"fast_speech_{st.session_state.detected_language.lower()}.mp3",
-            mime="audio/mp3"
+            file_name=f"speech_{st.session_state.detected_language.split()[0].lower()}.{file_extension}",
+            mime=audio_format
         )
         
     except Exception as e:
         st.error(f"Audio error: {str(e)}")
 
-# Quick tips
-with st.expander("⚡ Speed Tips"):
+# Installation guide
+with st.expander("🛠️ Setup AI4Bharat TTS"):
     st.markdown("""
-    **For Fastest, Most Dynamic Speech:**
-    - ✅ Always enable ChatGPT Enhancement
-    - ✅ Use short, punchy sentences
-    - ✅ The system automatically uses fast speech (no slow mode)
-    - ✅ Enhancement adds energy and emotion automatically
-    - ❌ Don't use very long paragraphs
+    ### Install AI4Bharat TTS:
+    
+    ```bash
+    pip install TTS torch torchaudio
+    ```
+    
+    ### Test installation:
+    ```python
+    from TTS.api import TTS
+    tts = TTS("tts_models/hi/fastpitch/fastpitch")
+    tts.tts_to_file("नमस्कार", "output.wav")
+    ```
+    
+    ### Available Models:
+    - Hindi, Bengali, Telugu, Tamil, Marathi
+    - Gujarati, Kannada, Malayalam, Odia, Assamese
+    - English (LJSpeech)
     """)
+
+# Show supported languages
+with st.expander("🌐 Supported Languages"):
+    for code, info in AI4BHARAT_LANGUAGES.items():
+        status = "✅" if AI4BHARAT_AVAILABLE else "⏳"
+        st.write(f"{status} **{info['name']}** ({info['display']}) - `{code}`")
 
 # Cleanup
 def cleanup_temp_files():
