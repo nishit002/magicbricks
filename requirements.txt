@@ -16,4 +16,5 @@ SpeechRecognition>=3.10.0
 pydub>=0.25.1
 indic-transliteration>=2.3.0
 pyaudio>=0.2.11
-fuzzywuzzy
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.25.1
