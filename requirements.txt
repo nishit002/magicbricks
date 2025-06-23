@@ -11,19 +11,7 @@ groq
 pandas
 beautifulsoup4
 openpyxl
-asyncio
-platform
 # Speech-to-Text App Dependencies
 SpeechRecognition>=3.10.0
-PyAudio>=0.2.11
-wave>=0.0.2
 pydub>=0.25.1
-# Additional audio processing libraries
-librosa>=0.10.0
 soundfile>=0.12.1
-# Alternative speech recognition engines
-vosk>=0.3.45
-whisper-openai>=20231117
-# Enhanced audio recording capabilities
-pyaudio-fork>=0.2.11
-sounddevice>=0.4.6
